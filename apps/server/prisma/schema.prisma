@@ -1,0 +1,60 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  name      String?
+  projects  Project[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Project {
+  id          String       @id @default(uuid())
+  title       String
+  description String?
+  thumbnail   String?
+  duration    Float        @default(0)
+  timeline    String       // JSON string of the timeline state
+  userId      String
+  user        User         @relation(fields: [userId], references: [id])
+  assets      MediaAsset[]
+  exports     Export[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model MediaAsset {
+  id        String   @id @default(uuid())
+  name      String
+  type      String   // video, audio, image
+  url       String
+  path      String
+  duration  Float?
+  size      Int
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Export {
+  id         String   @id @default(uuid())
+  status     String   // pending, processing, completed, failed
+  url        String?
+  format     String
+  resolution String
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id])
+  createdAt  DateTime @default(now())
+}

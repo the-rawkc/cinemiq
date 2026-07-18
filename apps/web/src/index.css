@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-slate-100 overflow-hidden;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-surface/80 backdrop-blur-xl border border-white/5 rounded-2xl;
+  }
+  
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-md border border-white/10 rounded-xl hover:bg-white/10 transition-all duration-300;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg transition-all duration-300 shadow-neon active:scale-95 disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-surface border border-border hover:bg-surface-lighter text-white rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50;
+  }
+
+  .input-field {
+    @apply w-full bg-surface-lighter border border-border rounded-lg px-4 py-2 focus:border-primary focus:outline-none transition-all duration-300;
+  }
+
+  /* Timeline Specific Styles */
+  .timeline-track {
+    @apply relative h-24 bg-surface/50 border-b border-border flex items-center px-2 min-w-full;
+  }
+
+  .timeline-clip {
+    @apply absolute h-16 bg-primary/20 border border-primary/40 rounded-md overflow-hidden cursor-move select-none hover:border-primary transition-colors;
+  }
+
+  .timeline-playhead {
+    @apply absolute top-0 bottom-0 w-0.5 bg-secondary shadow-neon-cyan z-50 pointer-events-none;
+  }
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-full hover:bg-slate-700;
+}

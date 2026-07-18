@@ -1,0 +1,18 @@
+{
+  "name": "cinemiq-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=apps/server",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:desktop": "npm run dev --workspace=apps/desktop",
+    "dev:mobile": "npm run start --workspace=apps/mobile"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "rimraf": "^5.0.0"
+  }
+}
