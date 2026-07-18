@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Project, TimelineClip, TimelineTrack, Resolution } from '../core/types/project';
+import { API_URL } from '../config';
 
 interface ProjectState {
   project: Project;
@@ -44,11 +45,11 @@ const sanitizeProject = (project: Project): Project => {
   const sanitizedClips = project.clips.map(clip => {
     let source = clip.source;
     if (source && source.includes('assets.mixkit.co')) {
-      source = 'http://localhost:5000/uploads/default_fallback.mp4';
+      source = `${API_URL}/uploads/default_fallback.mp4`;
     } else if (source && source.includes('SoundHelix-Song-1.mp3')) {
-      source = 'http://localhost:5000/uploads/music1.mp3';
+      source = `${API_URL}/uploads/music1.mp3`;
     } else if (source && source.includes('SoundHelix-Song-2.mp3')) {
-      source = 'http://localhost:5000/uploads/music2.mp3';
+      source = `${API_URL}/uploads/music2.mp3`;
     }
     return { ...clip, source };
   });

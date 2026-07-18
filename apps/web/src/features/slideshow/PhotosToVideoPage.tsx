@@ -14,6 +14,7 @@ import {
     Video,
     Download
 } from 'lucide-react';
+import { API_URL } from '../../config';
 
 const PRESET_IMAGES = [
     { id: 'preset-1', name: 'Golden Beach Coastline', url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80' },
@@ -24,8 +25,8 @@ const PRESET_IMAGES = [
 
 const PRESET_AUDIOS = [
     { name: 'None', source: '' },
-    { name: 'Ambient Synth Beat', source: 'http://localhost:5000/uploads/music1.mp3' },
-    { name: 'Cinematic Orchestral', source: 'http://localhost:5000/uploads/music2.mp3' }
+    { name: 'Ambient Synth Beat', source: `${API_URL}/uploads/music1.mp3` },
+    { name: 'Cinematic Orchestral', source: `${API_URL}/uploads/music2.mp3` }
 ];
 
 interface SlideImage {
@@ -56,7 +57,7 @@ export const PhotosToVideoPage: React.FC<PhotosToVideoPageProps> = ({ onClose, o
     // Slideshow config
     const [slideDuration, setSlideDuration] = useState<number>(3); // seconds per slide
     const [transitionEffect, setTransitionEffect] = useState<'none' | 'fade'>('fade');
-    const [audioSource, setAudioSource] = useState<string>('http://localhost:5000/uploads/music1.mp3');
+    const [audioSource, setAudioSource] = useState<string>(`${API_URL}/uploads/music1.mp3`);
     const [titleText, setTitleText] = useState<string>('My Cinematic Slideshow');
     const [titleColor, setTitleColor] = useState<string>('#3b82f6');
     const [titleFontSize, setTitleFontSize] = useState<number>(48);
@@ -151,7 +152,7 @@ export const PhotosToVideoPage: React.FC<PhotosToVideoPageProps> = ({ onClose, o
                 const formData = new FormData();
                 formData.append('file', file);
 
-                const res = await fetch('http://localhost:5000/api/editor/upload', {
+                const res = await fetch(`${API_URL}/api/editor/upload`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -159,7 +160,7 @@ export const PhotosToVideoPage: React.FC<PhotosToVideoPageProps> = ({ onClose, o
                 if (!res.ok) throw new Error('Upload failed');
 
                 const data = await res.json();
-                const serverUrl = `http://localhost:5000${data.url}`;
+                const serverUrl = `${API_URL}${data.url}`;
 
                 uploadedSlides.push({
                     id: Math.random().toString(36).substring(2, 9),
@@ -191,7 +192,7 @@ export const PhotosToVideoPage: React.FC<PhotosToVideoPageProps> = ({ onClose, o
             const formData = new FormData();
             formData.append('file', file);
 
-            const res = await fetch('http://localhost:5000/api/editor/upload', {
+            const res = await fetch(`${API_URL}/api/editor/upload`, {
                 method: 'POST',
                 body: formData,
             });
@@ -199,7 +200,7 @@ export const PhotosToVideoPage: React.FC<PhotosToVideoPageProps> = ({ onClose, o
             if (!res.ok) throw new Error('Audio upload failed');
 
             const data = await res.json();
-            const serverUrl = `http://localhost:5000${data.url}`;
+            const serverUrl = `${API_URL}${data.url}`;
 
             const uploadedAudio = {
                 name: `Local: ${file.name.substring(0, 20)}`,
@@ -370,7 +371,7 @@ export const PhotosToVideoPage: React.FC<PhotosToVideoPageProps> = ({ onClose, o
 
         try {
             // 1. Post request to the render endpoint
-            const response = await fetch('http://localhost:5000/api/editor/render', {
+            const response = await fetch(`${API_URL}/api/editor/render`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ project: projectData }),
@@ -381,13 +382,13 @@ export const PhotosToVideoPage: React.FC<PhotosToVideoPageProps> = ({ onClose, o
                 // Poll for completion
                 const intervalId = setInterval(async () => {
                     try {
-                        const statusResponse = await fetch(`http://localhost:5000/api/editor/render/status/${data.jobId}`);
+                        const statusResponse = await fetch(`${API_URL}/api/editor/render/status/${data.jobId}`);
                         const statusData = await statusResponse.json();
 
                         if (statusData.status === 'done') {
                             setRenderStatus('completed');
                             setRenderProgress(100);
-                            setRenderOutputUrl(`http://localhost:5000${statusData.outputPath}`);
+                            setRenderOutputUrl(`${API_URL}${statusData.outputPath}`);
                             clearInterval(intervalId);
                         } else if (statusData.status === 'failed') {
                             setRenderStatus('failed');

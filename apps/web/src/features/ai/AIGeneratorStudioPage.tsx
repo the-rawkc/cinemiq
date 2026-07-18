@@ -12,6 +12,7 @@ import {
     Layers
 } from 'lucide-react';
 import { useProjectStore } from '../../store/useProjectStore';
+import { API_URL } from '../../config';
 
 interface AIGeneratorStudioPageProps {
     onClose: () => void;
@@ -46,17 +47,17 @@ export const AIGeneratorStudioPage: React.FC<AIGeneratorStudioPageProps> = ({
 
         try {
             // 1. Trigger AI Timeline/Storyboard generation in parallel with API searches
-            const timelinePromise = fetch('http://localhost:5000/api/ai/prompt-timeline', {
+            const timelinePromise = fetch(`${API_URL}/api/ai/prompt-timeline`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt }),
             }).then(r => r.json());
 
-            const giphyPromise = fetch(`http://localhost:5000/api/ai/giphy-search?query=${encodeURIComponent(prompt)}`)
+            const giphyPromise = fetch(`${API_URL}/api/ai/giphy-search?query=${encodeURIComponent(prompt)}`)
                 .then(r => r.json())
                 .catch(() => []);
 
-            const freesoundPromise = fetch(`http://localhost:5000/api/ai/freesound-search?query=${encodeURIComponent(prompt)}`)
+            const freesoundPromise = fetch(`${API_URL}/api/ai/freesound-search?query=${encodeURIComponent(prompt)}`)
                 .then(r => r.json())
                 .catch(() => []);
 
@@ -245,7 +246,7 @@ export const AIGeneratorStudioPage: React.FC<AIGeneratorStudioPageProps> = ({
                                         >
                                             <div className="aspect-video w-full bg-zinc-950 relative overflow-hidden">
                                                 <img
-                                                    src={clip.source.startsWith('http') ? clip.source : `http://localhost:5000${clip.source}`}
+                                                    src={clip.source.startsWith('http') ? clip.source : `${API_URL}${clip.source}`}
                                                     alt={clip.name}
                                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                                 />

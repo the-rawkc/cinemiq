@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { useProjectStore } from '../../store/useProjectStore';
+import { API_URL } from '../../config';
 
 export const MediaBrowser: React.FC = () => {
   const { activeExplorerTab, setActiveExplorerTab, selectedClipId } = useUIStore();
@@ -23,9 +24,9 @@ export const MediaBrowser: React.FC = () => {
 
   // Mock initial assets with valid local fallback sources
   const mockLocalAssets = [
-    { id: 'asset-1', name: 'Scenic Forest.mp4', type: 'video', duration: '5s', thumb: 'https://images.unsplash.com/photo-1473448912268-2022ce9509d8?w=200&auto=format&fit=crop&q=60', source: 'http://localhost:5000/uploads/default_fallback.mp4' },
-    { id: 'asset-2', name: 'Urban Night.mp4', type: 'video', duration: '8s', thumb: 'https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=200&auto=format&fit=crop&q=60', source: 'http://localhost:5000/uploads/default_fallback.mp4' },
-    { id: 'asset-3', name: 'Ambient Track.mp3', type: 'audio', duration: '14s', thumb: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200&auto=format&fit=crop&q=60', source: 'http://localhost:5000/uploads/music1.mp3' },
+    { id: 'asset-1', name: 'Scenic Forest.mp4', type: 'video', duration: '5s', thumb: 'https://images.unsplash.com/photo-1473448912268-2022ce9509d8?w=200&auto=format&fit=crop&q=60', source: `${API_URL}/uploads/default_fallback.mp4` },
+    { id: 'asset-2', name: 'Urban Night.mp4', type: 'video', duration: '8s', thumb: 'https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=200&auto=format&fit=crop&q=60', source: `${API_URL}/uploads/default_fallback.mp4` },
+    { id: 'asset-3', name: 'Ambient Track.mp3', type: 'audio', duration: '14s', thumb: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200&auto=format&fit=crop&q=60', source: `${API_URL}/uploads/music1.mp3` },
     { id: 'asset-4', name: 'Vibrant Sunset.jpg', type: 'image', duration: '3s', thumb: 'https://images.unsplash.com/photo-1472214222555-d404758b1c42?w=200&auto=format&fit=crop&q=60', source: 'https://images.unsplash.com/photo-1472214222555-d404758b1c42?w=200&auto=format&fit=crop&q=60' },
   ];
 
@@ -38,7 +39,7 @@ export const MediaBrowser: React.FC = () => {
       type: c.type,
       duration: `${Math.round(c.duration)}s`,
       thumb: c.type === 'image' || c.source.includes('unsplash') || c.source.includes('freepik') || c.source.includes('ai-image')
-        ? (c.source.startsWith('http') ? c.source : `http://localhost:5000${c.source}`)
+        ? (c.source.startsWith('http') ? c.source : `${API_URL}${c.source}`)
         : 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=200&auto=format&fit=crop&q=60',
       source: c.source
     }));
@@ -71,9 +72,9 @@ export const MediaBrowser: React.FC = () => {
   );
 
   const mockAudioAssets = [
-    { id: 'aud-1', name: 'Synthwave Rise.wav', duration: '4s', genre: 'Sci-Fi SFX', source: 'http://localhost:5000/uploads/music1.mp3' },
-    { id: 'aud-2', name: 'Cyberpunk Hit.mp3', duration: '2.5s', genre: 'Cinematic SFX', source: 'http://localhost:5000/uploads/music2.mp3' },
-    { id: 'aud-3', name: 'Lo-Fi Chill Background.mp3', duration: '2m 14s', genre: 'Ambient Beat', source: 'http://localhost:5000/uploads/music1.mp3' },
+    { id: 'aud-1', name: 'Synthwave Rise.wav', duration: '4s', genre: 'Sci-Fi SFX', source: `${API_URL}/uploads/music1.mp3` },
+    { id: 'aud-2', name: 'Cyberpunk Hit.mp3', duration: '2.5s', genre: 'Cinematic SFX', source: `${API_URL}/uploads/music2.mp3` },
+    { id: 'aud-3', name: 'Lo-Fi Chill Background.mp3', duration: '2m 14s', genre: 'Ambient Beat', source: `${API_URL}/uploads/music1.mp3` },
   ];
 
   const combinedAudioAssets = [...mockAudioAssets, ...uniqueGeneratedAudio].filter(asset =>

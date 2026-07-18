@@ -14,6 +14,7 @@ import { PhotosToVideoPage } from './features/slideshow/PhotosToVideoPage';
 import { useUIStore } from './store/useUIStore';
 import { useProjectStore } from './store/useProjectStore';
 import { editorBus } from './core/events/EventBus';
+import { API_URL } from './config';
 
 import './App.css';
 
@@ -34,7 +35,7 @@ function App() {
     setRenderOutputUrl(null);
 
     try {
-      const response = await fetch('http://localhost:5000/api/editor/render', {
+      const response = await fetch(`${API_URL}/api/editor/render`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project }),
@@ -44,13 +45,13 @@ function App() {
       if (data.jobId) {
         const intervalId = setInterval(async () => {
           try {
-            const statusResponse = await fetch(`http://localhost:5000/api/editor/render/status/${data.jobId}`);
+            const statusResponse = await fetch(`${API_URL}/api/editor/render/status/${data.jobId}`);
             const statusData = await statusResponse.json();
 
             if (statusData.status === 'done') {
               setRenderStatus('completed');
               setRenderProgress(100);
-              setRenderOutputUrl(`http://localhost:5000${statusData.outputPath}`);
+              setRenderOutputUrl(`${API_URL}${statusData.outputPath}`);
               clearInterval(intervalId);
             } else if (statusData.status === 'failed') {
               setRenderStatus('failed');
