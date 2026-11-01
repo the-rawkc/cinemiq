@@ -118,7 +118,7 @@ export const AIGeneratorStudioPage: React.FC<AIGeneratorStudioPageProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 w-screen h-screen bg-[#070709] bg-radial-gradient z-50 overflow-y-auto flex flex-col text-zinc-100 font-sans">
+        <div className="fixed inset-0 w-full h-screen bg-[#070709] bg-radial-gradient z-50 overflow-y-auto overflow-x-hidden flex flex-col text-zinc-100 font-sans custom-scrollbar">
 
             {/* 1. Header Bar */}
             <header className="min-h-16 border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-40 flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:px-6 gap-3">

@@ -65,19 +65,19 @@ export const MenuBar: React.FC<MenuBarProps> = ({ onGoHome }) => {
   };
 
   return (
-    <div className="h-10 w-full bg-zinc-950 border-b border-zinc-900/60 flex items-center justify-between px-4 select-none relative z-50 text-[11px] text-zinc-300 font-medium">
+    <div className="h-10 w-full bg-zinc-950 border-b border-zinc-900/60 flex items-center justify-between px-2.5 sm:px-4 select-none relative z-50 text-[11px] text-zinc-300 font-medium overflow-x-auto scrollbar-none">
       {/* Brand logo & Menus */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         <button
           onClick={onGoHome}
-          className="flex items-center gap-1.5 mr-6 hover:opacity-85 active:scale-95 transition-all text-left group"
+          className="flex items-center gap-1.5 mr-2 sm:mr-6 hover:opacity-85 active:scale-95 transition-all text-left group shrink-0"
           title="Return to Main Dashboard"
         >
           <div className="w-5 h-5 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 group-hover:shadow-cyan-500/40 transition-all">
             <span className="text-white font-black text-[10px]">C</span>
           </div>
           <span className="font-extrabold tracking-wider text-white text-[12px] bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent">CINEMIQ</span>
-          <span className="text-[8px] bg-zinc-800 text-cyan-400 font-extrabold px-1 py-0.2 rounded border border-zinc-700/50 scale-90">STUDIO</span>
+          <span className="text-[8px] bg-zinc-800 text-cyan-400 font-extrabold px-1 py-0.2 rounded border border-zinc-700/50 scale-90 hidden sm:inline">STUDIO</span>
         </button>
 
         <div className="flex items-center">
@@ -142,7 +142,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({ onGoHome }) => {
       </div>
 
       {/* Project Status */}
-      <div className="flex items-center gap-3">
+      <div className="hidden sm:flex items-center gap-3 shrink-0">
         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-900/50 border border-zinc-800/40 text-zinc-400">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span>{projectName}</span>

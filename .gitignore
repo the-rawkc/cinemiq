@@ -23,6 +23,13 @@ build/
 **/apps/server/prisma/dev.db
 **/apps/server/prisma/dev.db-journal
 
+# Uploads and temporary media
+uploads/
+**/uploads/
+*.mp4
+*.webm
+*.vtt
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

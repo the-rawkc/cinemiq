@@ -7,9 +7,24 @@
 }
 
 @layer base {
-  body {
-    @apply bg-background text-slate-100 overflow-hidden;
+  html {
+    @apply bg-background text-slate-100;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    @apply bg-background text-slate-100;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #root {
+    min-height: 100%;
+    width: 100%;
   }
 }
 

@@ -30,9 +30,9 @@ export const Toolbar: React.FC = () => {
   ];
 
   return (
-    <div className="h-12 w-full bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 flex items-center justify-between px-4 select-none">
+    <div className="h-12 w-full bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 flex items-center justify-between px-3 sm:px-4 select-none overflow-x-auto scrollbar-none gap-3">
       {/* Editing Tools */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
         {tools.map((tool) => (
           <button
             key={tool.id}
@@ -48,7 +48,7 @@ export const Toolbar: React.FC = () => {
           </button>
         ))}
 
-        <div className="w-[1px] h-6 bg-zinc-800/80 mx-2" />
+        <div className="w-[1px] h-6 bg-zinc-800/80 mx-1 sm:mx-2" />
 
         {/* Dynamic Modifiers */}
         <button 
@@ -69,10 +69,10 @@ export const Toolbar: React.FC = () => {
       </div>
 
       {/* AI Center & Playback Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={() => editorBus.emit('shortcut:triggered', { command: 'ai:open_studio' })}
-          className="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-cyan-500/30 flex items-center gap-2 group transition-all text-zinc-300 hover:text-white font-medium text-[11px]"
+          className="hidden sm:flex px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-cyan-500/30 items-center gap-2 group transition-all text-zinc-300 hover:text-white font-medium text-[11px]"
         >
           <Sparkles size={12} className="text-cyan-400 group-hover:scale-110 transition-transform" />
           <span>AI Generator Studio</span>
@@ -80,7 +80,7 @@ export const Toolbar: React.FC = () => {
 
         <button
           onClick={() => setIsPlaying(!isPlaying)}
-          className={`px-4 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 uppercase transition-all ${
+          className={`px-3 sm:px-4 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1.5 uppercase transition-all ${
             isPlaying 
               ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-lg shadow-rose-500/20'
               : 'bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-500 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20'
@@ -92,15 +92,16 @@ export const Toolbar: React.FC = () => {
 
         <button 
           onClick={() => editorBus.emit('shortcut:triggered', { command: 'editor:render' })}
-          className="px-3 py-1.5 rounded-lg bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white transition-all text-[11px] font-medium flex items-center gap-1.5"
+          className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white transition-all text-[11px] font-medium flex items-center gap-1.5"
         >
           <FileVideo size={12} />
-          <span>Render Project</span>
+          <span className="hidden sm:inline">Render Project</span>
+          <span className="sm:hidden">Render</span>
         </button>
       </div>
 
       {/* Undo/Redo & Zoom Controls */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
         <button 
           onClick={() => editorBus.emit('shortcut:triggered', { command: 'history:undo' })}
           title="Undo (Ctrl+Z)"

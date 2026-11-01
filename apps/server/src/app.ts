@@ -6,6 +6,7 @@ import cors from 'cors';
 import path from 'path';
 import aiRoutes from './routes/ai.routes';
 import editorRoutes from './routes/editor.routes';
+import shortsRoutes from './routes/shorts.routes';
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // Routes
 app.use('/api/ai', aiRoutes);
 app.use('/api/editor', editorRoutes);
+app.use('/api/shorts', shortsRoutes);
 
 app.get('/', (req, res) => {
   res.json({ 
@@ -30,7 +32,8 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       ai: '/api/ai',
-      editor: '/api/editor'
+      editor: '/api/editor',
+      shorts: '/api/shorts'
     }
   });
 });

@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { AIGeneratorStudioPage } from './features/ai/AIGeneratorStudioPage';
 import { LandingPage } from './features/landing/LandingPage';
 import { PhotosToVideoPage } from './features/slideshow/PhotosToVideoPage';
+import { YouTubeShortsPage } from './features/shorts/YouTubeShortsPage';
 import { useUIStore } from './store/useUIStore';
 import { useProjectStore } from './store/useProjectStore';
 import { editorBus } from './core/events/EventBus';
@@ -26,7 +27,7 @@ function App() {
   const [renderProgress, setRenderProgress] = useState(0);
   const [renderOutputUrl, setRenderOutputUrl] = useState<string | null>(null);
 
-  const [currentView, setCurrentView] = useState<'landing' | 'edit-videos' | 'ai-generation' | 'photos-to-video'>('landing');
+  const [currentView, setCurrentView] = useState<'landing' | 'edit-videos' | 'ai-generation' | 'photos-to-video' | 'youtube-shorts'>('landing');
   const [saveAlertMessage, setSaveAlertMessage] = useState<string | null>(null);
 
   const triggerRenderJob = async () => {
@@ -233,8 +234,20 @@ function App() {
     );
   }
 
+  if (currentView === 'youtube-shorts') {
+    return (
+      <YouTubeShortsPage
+        onClose={() => setCurrentView('landing')}
+        onLoadProject={(proj) => {
+          setProject(proj);
+          setCurrentView('edit-videos');
+        }}
+      />
+    );
+  }
+
   return (
-    <div className="h-screen w-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden font-sans select-none antialiased">
+    <div className="min-h-screen md:h-screen w-full flex flex-col bg-zinc-950 text-zinc-100 overflow-x-hidden overflow-y-auto md:overflow-hidden font-sans select-none antialiased">
       {/* 1. Main Top Application Menu */}
       <MenuBar onGoHome={() => setCurrentView('landing')} />
 
@@ -242,7 +255,7 @@ function App() {
       <Toolbar />
 
       {/* 3. Resizable Panels Grid Workspace */}
-      <div className="flex-1 overflow-hidden relative">
+      <div className="min-h-[500px] md:min-h-0 flex-1 overflow-hidden relative">
         <ResizableContainer
           direction="vertical"
           initialSize={60} // Upper workspace height percentage
