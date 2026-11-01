@@ -29,6 +29,13 @@ export interface ViralClip {
   tags: string[];
 }
 
+export interface DownloadProgress {
+  percent: number;
+  speed?: string;
+  totalSize?: string;
+  eta?: string;
+}
+
 export interface ShortsJob {
   id: string;
   status: 'pending' | 'downloading' | 'analyzing' | 'done' | 'failed';
@@ -39,6 +46,7 @@ export interface ShortsJob {
   videoUrl?: string;
   clips?: ViralClip[];
   error?: string;
+  downloadProgress?: DownloadProgress;
 }
 
 // In-memory active jobs store
@@ -288,6 +296,7 @@ export const ShortsService = {
       const dlArgs = [
         '--js-runtimes',
         'node',
+        '--newline',
         '-f',
         'bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo[height<=480]+bestaudio/best',
         '--merge-output-format',
@@ -321,20 +330,50 @@ export const ShortsService = {
       const dlProc = spawn(getYtDlpBinary(), dlArgs, { windowsHide: true });
       let stderr = '';
 
-      dlProc.stdout.on('data', (data) => {
-        const str = data.toString();
-        // Parse progress if available
-        const pMatch = str.match(/(\d{1,3}\.\d)%/);
-        if (pMatch) {
-          const pct = parseFloat(pMatch[1]);
-          // Map 0-100% download progress to 15%-70% of total job progress
-          job.progress = Math.min(70, Math.round(15 + (pct * 0.55)));
-          job.stage = `Downloading video (${pct.toFixed(0)}%)...`;
+      const parseProgressOutput = (rawText: string) => {
+        const lines = rawText.split('\n');
+        for (const line of lines) {
+          // Format: [download]  14.2% of  218.53KiB at  567.63KiB/s ETA 00:00
+          const fullMatch = line.match(/\[download\]\s+(\d{1,3}(?:\.\d+)?)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)\s+ETA\s+([^\s]+)/);
+          if (fullMatch) {
+            const pct = parseFloat(fullMatch[1]);
+            const totalSize = fullMatch[2];
+            const speed = fullMatch[3];
+            const eta = fullMatch[4];
+            job.progress = Math.min(70, Math.round(15 + (pct * 0.55)));
+            job.stage = `Downloading stream: ${pct.toFixed(0)}% • ${speed} (ETA ${eta})`;
+            job.downloadProgress = {
+              percent: pct,
+              speed,
+              totalSize,
+              eta,
+            };
+            continue;
+          }
+
+          // Fallback simple percentage
+          const pMatch = line.match(/(\d{1,3}\.\d)%/);
+          if (pMatch) {
+            const pct = parseFloat(pMatch[1]);
+            job.progress = Math.min(70, Math.round(15 + (pct * 0.55)));
+            job.stage = `Downloading video (${pct.toFixed(0)}%)...`;
+            if (!job.downloadProgress) {
+              job.downloadProgress = { percent: pct };
+            } else {
+              job.downloadProgress.percent = pct;
+            }
+          }
         }
+      };
+
+      dlProc.stdout.on('data', (data) => {
+        parseProgressOutput(data.toString());
       });
 
       dlProc.stderr.on('data', (data) => {
-        stderr += data.toString();
+        const errStr = data.toString();
+        stderr += errStr;
+        parseProgressOutput(errStr);
       });
 
       dlProc.on('close', (code) => {

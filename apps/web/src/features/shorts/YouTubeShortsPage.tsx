@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft,
   Scissors,
-  Sparkles,
   Play,
   Pause,
   Download,
@@ -59,6 +58,13 @@ interface ViralClip {
   tags: string[];
 }
 
+interface DownloadProgress {
+  percent: number;
+  speed?: string;
+  totalSize?: string;
+  eta?: string;
+}
+
 interface ShortsJob {
   id: string;
   status: 'pending' | 'downloading' | 'analyzing' | 'done' | 'failed';
@@ -68,6 +74,7 @@ interface ShortsJob {
   videoUrl?: string;
   clips?: ViralClip[];
   error?: string;
+  downloadProgress?: DownloadProgress;
 }
 
 interface YouTubeShortsPageProps {
@@ -128,6 +135,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [targetResolution, setTargetResolution] = useState<'720p' | '1080p'>('720p');
   const [isFolderExporting, setIsFolderExporting] = useState(false);
   const [folderProgressMsg, setFolderProgressMsg] = useState('');
+  const [folderSavePercent, setFolderSavePercent] = useState<number>(0);
   const [exportedFolderPath, setExportedFolderPath] = useState<string | null>(null);
   const [exportedClips, setExportedClips] = useState<Array<{ title: string; filename: string; url: string; duration: number }>>([]);
 
@@ -574,6 +582,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     if (!job?.id || clips.length === 0) return;
 
     setIsFolderExporting(true);
+    setFolderSavePercent(5);
     setFolderProgressMsg('Preparing folder export and rendering clips...');
     setErrorMessage(null);
 
@@ -596,6 +605,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         }
       }
 
+      setFolderSavePercent(20);
       setFolderProgressMsg('Rendering all shorts in ultrafast mode...');
       const res = await fetch(`${API_URL}/api/shorts/export-folder`, {
         method: 'POST',
@@ -626,11 +636,14 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
       setExportedFolderPath(data.folderPath);
       setExportedClips(data.clips);
+      setFolderSavePercent(40);
 
       if (dirHandle) {
         // Stream each MP4 file directly into the user's picked directory
         for (let i = 0; i < data.clips.length; i++) {
           const item = data.clips[i];
+          const currentPct = Math.round(40 + (((i + 1) / data.clips.length) * 58));
+          setFolderSavePercent(currentPct);
           setFolderProgressMsg(`Saving "${item.filename}" (${i + 1}/${data.clips.length}) directly into folder...`);
           const fileRes = await fetch(`${API_URL}${item.url}`);
           const fileBlob = await fileRes.blob();
@@ -639,15 +652,19 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           await writable.write(fileBlob);
           await writable.close();
         }
+        setFolderSavePercent(100);
         setFolderProgressMsg(`✅ All ${data.clips.length} shorts saved directly into your folder!`);
       } else {
         // Fallback for browsers without File System Access API: trigger direct loose file downloads
-        setFolderProgressMsg(`Downloading ${data.clips.length} loose MP4 files directly to your downloads...`);
         for (let i = 0; i < data.clips.length; i++) {
           const item = data.clips[i];
+          const currentPct = Math.round(40 + (((i + 1) / data.clips.length) * 58));
+          setFolderSavePercent(currentPct);
+          setFolderProgressMsg(`Downloading "${item.filename}" (${i + 1}/${data.clips.length}) loose to downloads...`);
           triggerBrowserDownload(`${API_URL}${item.url}`, item.filename);
           await new Promise((r) => setTimeout(r, 350));
         }
+        setFolderSavePercent(100);
         setFolderProgressMsg(`✅ All ${data.clips.length} loose shorts downloaded directly!`);
       }
     } catch (err: any) {
@@ -990,25 +1007,80 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
               </div>
             )}
 
-            {/* Active Analysis Progress Bar */}
+            {/* Real-Time Video Download & Analysis Progress HUD */}
             {isAnalyzing && (
-              <div className="mt-2 p-4 rounded-xl bg-zinc-900/90 border border-rose-500/30 flex flex-col gap-2.5 animate-in fade-in">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 text-rose-400 font-bold">
-                    <Sparkles size={14} className="animate-spin" />
-                    <span>{job?.stage || 'Downloading and analyzing video...'}</span>
+              <div className="mt-2 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-zinc-950/90 via-zinc-900 to-zinc-950/90 border border-rose-500/40 flex flex-col gap-3 shadow-2xl animate-in fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+                      <RefreshCw size={14} className="animate-spin text-rose-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-zinc-100 flex items-center gap-2">
+                        <span>{job?.stage || 'Connecting to stream and analyzing video...'}</span>
+                      </h4>
+                      <p className="text-[10px] text-zinc-400 mt-0.5">
+                        {job?.status === 'downloading'
+                          ? 'Multi-threaded streaming chunks via yt-dlp'
+                          : 'Processing transcript and virality scoring'}
+                      </p>
+                    </div>
                   </div>
-                  <span className="font-mono text-zinc-400">{job?.progress || 15}%</span>
+
+                  {/* Percentage Display */}
+                  <div className="flex items-baseline gap-1.5 self-end sm:self-auto font-mono">
+                    <span className="text-xl sm:text-2xl font-black text-rose-400">
+                      {job?.downloadProgress?.percent
+                        ? Math.round(job.downloadProgress.percent)
+                        : (job?.progress || 15)}
+                      %
+                    </span>
+                    <span className="text-[10px] text-zinc-500 uppercase font-sans font-bold">
+                      {job?.status === 'downloading' ? 'Downloaded' : 'Total Progress'}
+                    </span>
+                  </div>
                 </div>
-                <div className="w-full h-2 rounded-full bg-zinc-800 overflow-hidden">
+
+                {/* Animated Progress Track */}
+                <div className="w-full h-2.5 rounded-full bg-zinc-850 overflow-hidden relative p-[1px]">
                   <div
-                    className="h-full bg-gradient-to-r from-rose-500 to-amber-500 transition-all duration-300 rounded-full"
-                    style={{ width: `${Math.max(10, job?.progress || 15)}%` }}
-                  />
+                    className="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 transition-all duration-300 rounded-full relative"
+                    style={{
+                      width: `${Math.max(
+                        10,
+                        job?.downloadProgress?.percent
+                          ? Math.round(job.downloadProgress.percent)
+                          : (job?.progress || 15)
+                      )}%`,
+                    }}
+                  >
+                    <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full" />
+                  </div>
                 </div>
-                <p className="text-[10px] text-zinc-500">
-                  Powered by yt-dlp stream extractor, subtitle parsing, and AI hook detection.
-                </p>
+
+                {/* Live Download Speed & Metrics Badges (If Available) */}
+                <div className="flex items-center flex-wrap gap-2 text-[10px] text-zinc-400 pt-0.5">
+                  {job?.downloadProgress?.speed && (
+                    <span className="px-2 py-0.5 rounded-md bg-zinc-850 border border-zinc-750 font-mono text-amber-300 font-semibold flex items-center gap-1">
+                      <Zap size={11} className="text-amber-400" />
+                      <span>Speed: {job.downloadProgress.speed}</span>
+                    </span>
+                  )}
+                  {job?.downloadProgress?.totalSize && (
+                    <span className="px-2 py-0.5 rounded-md bg-zinc-850 border border-zinc-750 font-mono text-zinc-300 flex items-center gap-1">
+                      <span>Size: {job.downloadProgress.totalSize}</span>
+                    </span>
+                  )}
+                  {job?.downloadProgress?.eta && (
+                    <span className="px-2 py-0.5 rounded-md bg-zinc-850 border border-zinc-750 font-mono text-emerald-300 flex items-center gap-1">
+                      <Clock size={11} className="text-emerald-400" />
+                      <span>ETA: {job.downloadProgress.eta}</span>
+                    </span>
+                  )}
+                  <span className="text-zinc-500 ml-auto text-[10px]">
+                    Step: {job?.status || 'processing'} • 6x Multi-fragment acceleration active
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -1191,6 +1263,25 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                   )}
                 </div>
               </div>
+
+              {/* Folder Export Active Progress Alert */}
+              {isFolderExporting && (
+                <div className="p-4 rounded-xl bg-blue-950/60 border border-blue-500/40 flex flex-col gap-2.5 text-xs animate-in fade-in">
+                  <div className="flex items-center justify-between font-bold">
+                    <div className="flex items-center gap-2 text-blue-300">
+                      <RefreshCw size={14} className="animate-spin text-blue-400" />
+                      <span>{folderProgressMsg || 'Exporting shorts directly to folder...'}</span>
+                    </div>
+                    <span className="font-mono text-blue-400 text-sm font-black">{folderSavePercent}%</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-zinc-900 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-400 transition-all duration-300 rounded-full"
+                      style={{ width: `${Math.max(5, folderSavePercent)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Folder Export Success Alert */}
               {exportedClips.length > 0 && (
