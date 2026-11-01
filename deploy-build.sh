@@ -14,3 +14,9 @@ mkdir -p apps/server/bin
 curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar -xJ --strip-components=1 -C apps/server/bin
 chmod +x apps/server/bin/ffmpeg apps/server/bin/ffprobe
 echo "FFmpeg installed successfully in apps/server/bin!"
+
+# 4. Fetch static Linux yt-dlp binary for Render environment
+echo "Setting up yt-dlp binary for Render environment..."
+curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o apps/server/bin/yt-dlp
+chmod +x apps/server/bin/yt-dlp
+echo "yt-dlp installed successfully in apps/server/bin!"

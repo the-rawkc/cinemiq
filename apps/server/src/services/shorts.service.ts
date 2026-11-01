@@ -59,6 +59,17 @@ function getUploadsDir(): string {
   return dir;
 }
 
+function getYtDlpBinary(): string {
+  const binaryName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  const localBin = path.resolve(process.cwd(), 'bin', binaryName);
+  if (fs.existsSync(localBin)) return localBin;
+
+  const serverBin = path.resolve(process.cwd(), 'apps', 'server', 'bin', binaryName);
+  if (fs.existsSync(serverBin)) return serverBin;
+
+  return 'yt-dlp';
+}
+
 /**
  * Parse WebVTT subtitle file into timestamped lines
  */
@@ -145,7 +156,7 @@ export const ShortsService = {
         url,
       ];
 
-      const proc = spawn('yt-dlp', args, { windowsHide: true });
+      const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
       let stdout = '';
       let stderr = '';
 
@@ -276,7 +287,7 @@ export const ShortsService = {
         url,
       ];
 
-      const dlProc = spawn('yt-dlp', dlArgs, { windowsHide: true });
+      const dlProc = spawn(getYtDlpBinary(), dlArgs, { windowsHide: true });
       let stderr = '';
 
       dlProc.stdout.on('data', (data) => {
@@ -328,7 +339,7 @@ export const ShortsService = {
     try {
       await new Promise<void>((subResolve) => {
         const subProc = spawn(
-          'yt-dlp',
+          getYtDlpBinary(),
           [
             '--js-runtimes',
             'node',

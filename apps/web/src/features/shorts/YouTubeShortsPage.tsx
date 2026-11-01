@@ -163,6 +163,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API_URL}/api/shorts/status/${activeJobId}`);
+        const contentType = res.headers.get('content-type') || '';
+        if (!res.ok || !contentType.includes('application/json')) return;
         const data = await res.json();
 
         if (data.success && data.job) {
@@ -208,8 +210,20 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         }),
       });
 
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        let errorMsg = `Backend returned status ${res.status}`;
+        if (contentType.includes('application/json')) {
+          const errData = await res.json().catch(() => null);
+          if (errData?.error) errorMsg = errData.error;
+        } else {
+          errorMsg = `Backend API at ${API_URL} returned status ${res.status}. If deployed on Render, please allow the latest backend deployment to finish building.`;
+        }
+        throw new Error(errorMsg);
+      }
+
       const data = await res.json();
-      if (!res.ok || !data.success) {
+      if (!data.success) {
         throw new Error(data.error || 'Failed to start video processing');
       }
 
@@ -240,8 +254,20 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         body: formData,
       });
 
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        let errorMsg = `Upload returned status ${res.status}`;
+        if (contentType.includes('application/json')) {
+          const errData = await res.json().catch(() => null);
+          if (errData?.error) errorMsg = errData.error;
+        } else {
+          errorMsg = `Backend API at ${API_URL} returned status ${res.status}.`;
+        }
+        throw new Error(errorMsg);
+      }
+
       const data = await res.json();
-      if (!res.ok || !data.success) {
+      if (!data.success) {
         throw new Error(data.error || 'Failed to upload video');
       }
 
@@ -303,8 +329,20 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         }),
       });
 
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        let errorMsg = `Rendering returned status ${res.status}`;
+        if (contentType.includes('application/json')) {
+          const errData = await res.json().catch(() => null);
+          if (errData?.error) errorMsg = errData.error;
+        } else {
+          errorMsg = `Backend API at ${API_URL} returned status ${res.status}.`;
+        }
+        throw new Error(errorMsg);
+      }
+
       const data = await res.json();
-      if (!res.ok || !data.success) {
+      if (!data.success) {
         throw new Error(data.error || 'Rendering clip failed');
       }
 
