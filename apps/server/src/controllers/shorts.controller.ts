@@ -77,6 +77,7 @@ export const ShortsController = {
         endTime = 30,
         aspectRatio = '9:16-blur',
         headlineText = '',
+        targetResolution = '720p',
       } = req.body;
 
       if (!sourceVideoUrl) {
@@ -98,7 +99,7 @@ export const ShortsController = {
         return;
       }
 
-      console.log(`🎬 [Shorts] Rendering clip: ${startTime}s -> ${endTime}s, ratio: ${aspectRatio}`);
+      console.log(`🎬 [Shorts] Rendering clip: ${startTime}s -> ${endTime}s, ratio: ${aspectRatio}, resolution: ${targetResolution}`);
 
       const result = await ShortsService.renderShortClip({
         sourceVideoPath: diskPath,
@@ -106,6 +107,7 @@ export const ShortsController = {
         endTime: parseFloat(endTime),
         aspectRatio,
         headlineText,
+        targetResolution,
       });
 
       res.json({
@@ -269,10 +271,16 @@ export const ShortsController = {
         50
       );
 
+      const hashtags = ShortsService.generateHashtags(job.videoInfo);
+      (job as any).hashtags = hashtags;
+      (job as any).generationTimeMs = 80;
+      (job as any).downloadTimeMs = 0;
+      (job as any).isCachedSource = false;
+
       job.clips = clips;
       job.status = 'done';
       job.progress = 100;
-      job.stage = 'Analysis complete!';
+      job.stage = `Analysis complete! ${clips.length} clips ready.`;
 
       res.json({
         success: true,

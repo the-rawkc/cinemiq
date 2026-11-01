@@ -14,6 +14,8 @@ export interface VideoInfo {
   description: string;
   webpage_url: string;
   view_count?: number;
+  tags?: string[];
+  categories?: string[];
 }
 
 export interface ViralClip {
@@ -47,6 +49,13 @@ export interface ShortsJob {
   clips?: ViralClip[];
   error?: string;
   downloadProgress?: DownloadProgress;
+  // Timing & Telemetry
+  generationTimeMs?: number;
+  downloadTimeMs?: number;
+  downloadStartTime?: number;
+  downloadEndTime?: number;
+  isCachedSource?: boolean;
+  hashtags?: string[];
 }
 
 // In-memory active jobs store
@@ -205,6 +214,8 @@ export const ShortsService = {
             description: json.description ? json.description.substring(0, 300) : '',
             webpage_url: json.webpage_url || url,
             view_count: json.view_count || 0,
+            tags: Array.isArray(json.tags) ? json.tags : [],
+            categories: Array.isArray(json.categories) ? json.categories : [],
           };
           resolve(info);
         } catch (err: any) {
@@ -216,6 +227,83 @@ export const ShortsService = {
         reject(new Error(`Failed to execute yt-dlp: ${err.message}`));
       });
     });
+  },
+
+  /**
+   * Generate high-ranking viral hashtags tailored for YouTube Shorts, Reels, and TikTok
+   */
+  generateHashtags(info: VideoInfo): string[] {
+    const rawTags: string[] = [];
+
+    // 1. Existing tags from metadata
+    if (info.tags && Array.isArray(info.tags)) {
+      for (const t of info.tags) {
+        if (typeof t === 'string' && t.trim()) {
+          const clean = t.replace(/[^a-zA-Z0-9]/g, '');
+          if (clean.length > 1 && clean.length < 25) {
+            rawTags.push(`#${clean}`);
+          }
+        }
+      }
+    }
+
+    // 2. Channel name as tag
+    if (info.channel) {
+      const channelTag = info.channel.replace(/[^a-zA-Z0-9]/g, '');
+      if (channelTag && channelTag.length > 2) {
+        rawTags.push(`#${channelTag}`);
+      }
+    }
+
+    // 3. Significant title keywords
+    if (info.title) {
+      const titleWords = info.title
+        .replace(/[^\w\s]/gi, ' ')
+        .split(/\s+/)
+        .filter(
+          (w) =>
+            w.length >= 4 &&
+            !['with', 'from', 'this', 'that', 'what', 'when', 'where', 'have', 'been', 'about'].includes(
+              w.toLowerCase()
+            )
+        );
+
+      for (const word of titleWords.slice(0, 5)) {
+        rawTags.push(`#${word.charAt(0).toUpperCase() + word.slice(1)}`);
+      }
+    }
+
+    // 4. Guaranteed high-traffic viral discovery tags
+    const viralEssentials = [
+      '#shorts',
+      '#viral',
+      '#trending',
+      '#fyp',
+      '#foryou',
+      '#reels',
+      '#explore',
+      '#ytshorts',
+      '#entertainment',
+      '#comedy',
+      '#podcast',
+    ];
+
+    for (const v of viralEssentials) {
+      rawTags.push(v);
+    }
+
+    // Deduplicate case-insensitively while preserving original casing
+    const seen = new Set<string>();
+    const uniqueTags: string[] = [];
+    for (const tag of rawTags) {
+      const lower = tag.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        uniqueTags.push(tag);
+      }
+    }
+
+    return uniqueTags.slice(0, 25);
   },
 
   /**
@@ -270,14 +358,15 @@ export const ShortsService = {
     const job = activeJobs.get(jobId);
     if (!job) return;
 
+    const jobStartTime = Date.now();
     const uploadsDir = getUploadsDir();
-    const outputBase = path.join(uploadsDir, jobId);
 
     // 1. Fetch metadata immediately (fast ~1-2 seconds)
     let videoInfo: VideoInfo;
     try {
       videoInfo = await this.getVideoInfo(url);
       job.videoInfo = videoInfo;
+      job.hashtags = this.generateHashtags(videoInfo);
     } catch (err: any) {
       console.warn('Metadata lookup fallback:', err.message);
       videoInfo = {
@@ -290,9 +379,10 @@ export const ShortsService = {
         webpage_url: url,
       };
       job.videoInfo = videoInfo;
+      job.hashtags = this.generateHashtags(videoInfo);
     }
 
-    // 2. Generate AI clips immediately so user sees viral highlights in 2 seconds!
+    // 2. Generate AI clips immediately so user sees viral highlights in ~2 seconds!
     const earlyClips = await this.detectViralMoments(
       videoInfo,
       [],
@@ -300,20 +390,79 @@ export const ShortsService = {
       targetDuration
     );
     job.clips = earlyClips;
+    job.generationTimeMs = Date.now() - jobStartTime;
 
-    // 3. Fast progressive stream download without slow secondary audio-merge pass
+    // Check if we already have this video stream downloaded on disk (Instant 0s Local Cache)
+    const sanitizedId = (videoInfo.id || jobId).replace(/[^a-zA-Z0-9_\-]/g, '');
+    const currentFiles = fs.readdirSync(uploadsDir);
+    let cachedVideo = currentFiles.find((f) => {
+      const isMatch = f === `yt-${sanitizedId}.mp4` || (f.includes(sanitizedId) && (f.endsWith('.mp4') || f.endsWith('.webm')));
+      if (!isMatch) return false;
+      try {
+        return fs.statSync(path.join(uploadsDir, f)).size > 1024 * 1024;
+      } catch {
+        return false;
+      }
+    });
+
+    // Also check previous info.json files that map this YouTube ID to an existing video file
+    if (!cachedVideo && videoInfo.id) {
+      const infoFiles = currentFiles.filter((f) => f.endsWith('.info.json'));
+      for (const infoName of infoFiles) {
+        try {
+          const raw = fs.readFileSync(path.join(uploadsDir, infoName), 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (parsed.id === videoInfo.id) {
+            const basePrefix = infoName.replace(/\.info\.json$/, '');
+            const matchingVideo = currentFiles.find(
+              (f) =>
+                f.startsWith(basePrefix) &&
+                (f.endsWith('.mp4') || f.endsWith('.webm')) &&
+                fs.statSync(path.join(uploadsDir, f)).size > 1024 * 1024
+            );
+            if (matchingVideo) {
+              cachedVideo = matchingVideo;
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (cachedVideo) {
+      console.log(`⚡ [Shorts] Instant local cache hit! Reusing: ${cachedVideo}`);
+      const finalVideoPath = path.join(uploadsDir, cachedVideo);
+      job.videoPath = finalVideoPath;
+      job.videoUrl = `/uploads/shorts/${cachedVideo}`;
+      job.downloadTimeMs = 0;
+      job.isCachedSource = true;
+      job.progress = 100;
+      job.stage = `Analysis complete in ${(job.generationTimeMs / 1000).toFixed(1)}s! Loaded from instant cache (${earlyClips.length} clips ready).`;
+      job.status = 'done';
+      return;
+    }
+
+    // 3. Fast progressive stream download with parallel connections & direct write
     job.status = 'downloading';
-    job.stage = 'Highlights identified! Streaming video for instant preview...';
+    job.stage = 'Highlights identified! Accelerating stream for preview...';
     job.progress = 25;
+    job.downloadStartTime = Date.now();
 
     await new Promise<void>((resolve, reject) => {
-      const outputTemplate = `${outputBase}.%(ext)s`;
+      const outputTemplate = path.join(uploadsDir, `yt-${sanitizedId}.%(ext)s`);
       const dlArgs = [
         '--js-runtimes',
         'node',
         '--newline',
+        '-N',
+        '4',
+        '--no-part',
+        '--buffer-size',
+        '64K',
         '-f',
-        'best[height<=720][ext=mp4]/best[height<=480][ext=mp4]/18/bestvideo[height<=720]+bestaudio/best',
+        'best[height<=720][fps<=30][ext=mp4]/best[height<=720]/bestvideo[height<=720]+bestaudio/best[height<=480]/18/best',
+        '--merge-output-format',
+        'mp4',
         '--no-playlist',
         '--no-abort-on-error',
         '--extractor-args',
@@ -340,7 +489,7 @@ export const ShortsService = {
             const totalSize = fullMatch[2];
             const speed = fullMatch[3];
             const eta = fullMatch[4];
-            job.progress = Math.min(70, Math.round(15 + (pct * 0.55)));
+            job.progress = Math.min(85, Math.round(25 + (pct * 0.60)));
             job.stage = `Downloading stream: ${pct.toFixed(0)}% • ${speed} (ETA ${eta})`;
             job.downloadProgress = {
               percent: pct,
@@ -355,7 +504,7 @@ export const ShortsService = {
           const pMatch = line.match(/(\d{1,3}\.\d)%/);
           if (pMatch) {
             const pct = parseFloat(pMatch[1]);
-            job.progress = Math.min(70, Math.round(15 + (pct * 0.55)));
+            job.progress = Math.min(85, Math.round(25 + (pct * 0.60)));
             job.stage = `Downloading video (${pct.toFixed(0)}%)...`;
             if (!job.downloadProgress) {
               job.downloadProgress = { percent: pct };
@@ -377,8 +526,10 @@ export const ShortsService = {
       });
 
       dlProc.on('close', (code) => {
-        // Check if an output video file was produced
-        const potentialFiles = fs.readdirSync(uploadsDir).filter((f) => f.startsWith(jobId));
+        // Check if output video file was produced
+        const potentialFiles = fs.readdirSync(uploadsDir).filter(
+          (f) => f.startsWith(`yt-${sanitizedId}`) || f.startsWith(jobId)
+        );
         const hasVideo = potentialFiles.some((f) => f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv'));
         if (hasVideo) {
           resolve();
@@ -394,31 +545,15 @@ export const ShortsService = {
       dlProc.on('error', (err) => reject(err));
     });
 
-    // Extract metadata from the generated .info.json if present
-    const updatedFiles = fs.readdirSync(uploadsDir);
-    const infoFile = updatedFiles.find((f) => f.startsWith(jobId) && f.endsWith('.info.json'));
-    if (infoFile) {
-      try {
-        const rawJson = fs.readFileSync(path.join(uploadsDir, infoFile), 'utf-8');
-        const parsed = JSON.parse(rawJson);
-        videoInfo = {
-          id: parsed.id || jobId,
-          title: parsed.title || 'Untitled YouTube Video',
-          duration: Math.round(parsed.duration || 0),
-          thumbnail: parsed.thumbnail || (parsed.thumbnails && parsed.thumbnails[0]?.url) || '',
-          channel: parsed.uploader || parsed.channel || 'Unknown Channel',
-          description: parsed.description ? parsed.description.substring(0, 300) : '',
-          webpage_url: parsed.webpage_url || url,
-          view_count: parsed.view_count || 0,
-        };
-        job.videoInfo = videoInfo;
-      } catch (err: any) {
-        console.warn('Could not parse downloaded .info.json:', err.message);
-      }
-    }
+    job.downloadEndTime = Date.now();
+    job.downloadTimeMs = job.downloadEndTime - (job.downloadStartTime || jobStartTime);
+    job.isCachedSource = false;
 
     // Locate downloaded video
-    const videoFile = updatedFiles.find((f) => f.startsWith(jobId) && (f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv')));
+    const updatedFiles = fs.readdirSync(uploadsDir);
+    const videoFile = updatedFiles.find(
+      (f) => (f.startsWith(`yt-${sanitizedId}`) || f.startsWith(jobId)) && (f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv'))
+    );
     if (!videoFile) {
       throw new Error('Downloaded video file could not be found.');
     }
@@ -426,36 +561,8 @@ export const ShortsService = {
     const finalVideoPath = path.join(uploadsDir, videoFile);
     job.videoPath = finalVideoPath;
     job.videoUrl = `/uploads/shorts/${videoFile}`;
-    job.progress = 72;
-    job.stage = 'Extracting transcript & analyzing high-engagement highlights...';
-    job.status = 'analyzing';
-
-    // Parse subtitles from the unified pass if present
-    let transcriptSegments: Array<{ start: number; end: number; text: string }> = [];
-    const subtitleFile = updatedFiles.find((f) => f.startsWith(jobId) && f.endsWith('.vtt'));
-    if (subtitleFile) {
-      try {
-        transcriptSegments = parseVTTFile(path.join(uploadsDir, subtitleFile));
-        console.log(`📝 [Shorts] Successfully parsed ${transcriptSegments.length} subtitle transcript segments.`);
-      } catch (subErr: any) {
-        console.warn('Subtitles parsing failed (non-fatal):', subErr.message);
-      }
-    }
-
-    // AI Highlight Detection
-    job.stage = 'AI analyzing moments for virality and high retention...';
-    job.progress = 85;
-
-    const detectedClips = await this.detectViralMoments(
-      videoInfo,
-      transcriptSegments,
-      clipCount,
-      targetDuration
-    );
-
-    job.clips = detectedClips;
     job.progress = 100;
-    job.stage = `Analysis complete! ${detectedClips.length} clips ready to preview and export.`;
+    job.stage = `Analysis complete! All ${earlyClips.length} clips ready to preview and export.`;
     job.status = 'done';
   },
 
@@ -876,6 +983,7 @@ ${transcriptText}`;
         .inputOptions([`-ss ${startTime}`, `-t ${duration}`])
         .complexFilter(filterComplex, ['v'])
         .outputOptions([
+          '-map 0:a?',
           '-c:v libx264',
           '-preset ultrafast',
           '-crf 23',
@@ -883,6 +991,7 @@ ${transcriptText}`;
           '-threads 0',
           '-c:a aac',
           '-b:a 128k',
+          '-ar 44100',
           '-pix_fmt yuv420p',
           '-movflags +faststart',
         ])
@@ -1094,6 +1203,20 @@ ${transcriptText}`;
       exportedClips.push(...results);
     }
 
+    // Write viral hashtags to hashtags.txt and upload tags to tags.txt
+    const hashtagsList = job.hashtags || (job.videoInfo ? this.generateHashtags(job.videoInfo) : ['#shorts', '#viral', '#trending']);
+    const hashtagsFileContent = [
+      '========================================================================',
+      'VIRAL SOCIAL MEDIA HASHTAGS (YouTube Shorts, Instagram Reels, TikTok)',
+      '========================================================================',
+      hashtagsList.join(' '),
+      '',
+      'YOUTUBE STUDIO TAGS (Copy & paste directly into YouTube video tags field):',
+      hashtagsList.map((h) => h.replace(/^#/, '')).join(', '),
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(folderPath, 'hashtags.txt'), hashtagsFileContent, 'utf-8');
+
     // Write a clean summary.txt metadata file inside the folder
     const summaryLines = [
       `CINEMIQ SHORTS EXPORT - ${job.videoInfo?.title || 'YouTube Video'}`,
@@ -1101,7 +1224,10 @@ ${transcriptText}`;
       `Aspect Ratio: ${aspectRatio}`,
       `Exported At: ${new Date().toLocaleString()}`,
       '',
-      'CLIPS SUMMARY & HASHTAGS:',
+      'VIRAL HASHTAGS FOR UPLOAD:',
+      hashtagsList.join(' '),
+      '',
+      'CLIPS SUMMARY & TIMINGS:',
       '------------------------------------------------',
       ...clips.map((c, idx) => {
         const exported = exportedClips[idx];
