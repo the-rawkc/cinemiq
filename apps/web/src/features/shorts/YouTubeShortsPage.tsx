@@ -119,6 +119,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [job, setJob] = useState<ShortsJob | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [targetProgress, setTargetProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Selected Clip & Customizations
@@ -222,6 +224,34 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     };
   }, [selectedClipId, currentStart, currentEnd, isLooping]);
 
+  // High-frequency smooth progress interpolation (60fps feel)
+  useEffect(() => {
+    if (!isAnalyzing) {
+      if (job?.status === 'done') {
+        setDisplayProgress(100);
+      }
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setDisplayProgress((prev) => {
+        if (targetProgress > prev) {
+          const delta = targetProgress - prev;
+          // Smooth progressive easing: faster when far, gentle approach near target
+          const step = Math.max(0.2, delta * 0.12);
+          const next = Math.min(targetProgress, prev + step);
+          return Number(next.toFixed(1));
+        } else if (prev < 90 && targetProgress <= prev) {
+          // Micro-crawl while awaiting asynchronous network/FFmpeg responses
+          return Number((prev + 0.04).toFixed(1));
+        }
+        return prev;
+      });
+    }, 25);
+
+    return () => clearInterval(timer);
+  }, [isAnalyzing, targetProgress, job?.status]);
+
   // Poll Job Status if active
   useEffect(() => {
     if (!activeJobId || !isAnalyzing) return;
@@ -236,18 +266,28 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         if (data.success && data.job) {
           setJob(data.job);
           if (data.job.status === 'done') {
-            setIsAnalyzing(false);
+            setTargetProgress(100);
             clearInterval(interval);
+            // Smooth grace period to allow progress bar to reach 100% and user to see completed state
+            setTimeout(() => {
+              setIsAnalyzing(false);
+            }, 650);
           } else if (data.job.status === 'failed') {
             setIsAnalyzing(false);
             setErrorMessage(data.job.error || 'Analysis failed. Please try a different video.');
             clearInterval(interval);
+          } else {
+            // Downloading or analyzing - advance target progress incrementally
+            const serverProgress = data.job.downloadProgress?.percent
+              ? Math.min(95, Math.round(50 + data.job.downloadProgress.percent * 0.45))
+              : (data.job.progress || 15);
+            setTargetProgress((prev) => Math.max(prev, serverProgress));
           }
         }
       } catch (err: any) {
         console.error('Job polling error:', err);
       }
-    }, 1500);
+    }, 450);
 
     return () => clearInterval(interval);
   }, [activeJobId, isAnalyzing]);
@@ -262,6 +302,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
     setErrorMessage(null);
     setIsAnalyzing(true);
+    setDisplayProgress(0);
+    setTargetProgress(12);
     setRenderedDownloadUrl(null);
     setJob(null);
 
@@ -293,6 +335,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         throw new Error(data.error || 'Failed to start video processing');
       }
 
+      setTargetProgress((prev) => Math.max(prev, 22));
       setActiveJobId(data.jobId);
     } catch (err: any) {
       console.error('Analyze error:', err);
@@ -308,6 +351,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
     setErrorMessage(null);
     setIsAnalyzing(true);
+    setDisplayProgress(0);
+    setTargetProgress(30);
     setRenderedDownloadUrl(null);
     setJob(null);
 
@@ -354,7 +399,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         videoUrl: data.videoUrl,
         clips: data.clips,
       });
-      setIsAnalyzing(false);
+      setTargetProgress(100);
+      setTimeout(() => {
+        setIsAnalyzing(false);
+      }, 650);
     } catch (err: any) {
       console.error('Upload error:', err);
       setIsAnalyzing(false);
@@ -1035,14 +1083,24 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5">
                     <div className="w-7 h-7 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
-                      <RefreshCw size={14} className="animate-spin text-rose-400" />
+                      {displayProgress >= 100 ? (
+                        <CheckCircle2 size={15} className="text-emerald-400 animate-in zoom-in-75" />
+                      ) : (
+                        <RefreshCw size={14} className="animate-spin text-rose-400" />
+                      )}
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-zinc-100 flex items-center gap-2">
-                        <span>{job?.stage || 'Connecting to stream and analyzing video...'}</span>
+                        <span>
+                          {displayProgress >= 100
+                            ? (job?.stage || 'Complete! Clips ready.')
+                            : (job?.stage || 'Connecting to stream and analyzing video...')}
+                        </span>
                       </h4>
                       <p className="text-[10px] text-zinc-400 mt-0.5">
-                        {job?.status === 'downloading'
+                        {displayProgress >= 100
+                          ? 'Highlights processed and ready for preview & export'
+                          : job?.status === 'downloading'
                           ? 'Multi-threaded streaming chunks via yt-dlp'
                           : 'Processing transcript and virality scoring'}
                       </p>
@@ -1051,29 +1109,21 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
                   {/* Percentage Display */}
                   <div className="flex items-baseline gap-1.5 self-end sm:self-auto font-mono">
-                    <span className="text-xl sm:text-2xl font-black text-rose-400">
-                      {job?.downloadProgress?.percent
-                        ? Math.round(job.downloadProgress.percent)
-                        : (job?.progress || 15)}
-                      %
+                    <span className={`text-xl sm:text-2xl font-black transition-colors duration-200 ${displayProgress >= 100 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {Math.round(displayProgress)}%
                     </span>
                     <span className="text-[10px] text-zinc-500 uppercase font-sans font-bold">
-                      {job?.status === 'downloading' ? 'Downloaded' : 'Total Progress'}
+                      {displayProgress >= 100 ? 'Ready' : (job?.status === 'downloading' ? 'Downloaded' : 'Total Progress')}
                     </span>
                   </div>
                 </div>
 
                 {/* Animated Progress Track */}
-                <div className="w-full h-2.5 rounded-full bg-zinc-850 overflow-hidden relative p-[1px]">
+                <div className="w-full h-2 rounded-full bg-zinc-850 overflow-hidden relative p-[1px]">
                   <div
-                    className="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 transition-all duration-300 rounded-full relative"
+                    className="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 transition-all duration-200 ease-out rounded-full relative"
                     style={{
-                      width: `${Math.max(
-                        10,
-                        job?.downloadProgress?.percent
-                          ? Math.round(job.downloadProgress.percent)
-                          : (job?.progress || 15)
-                      )}%`,
+                      width: `${Math.min(100, Math.max(1, displayProgress))}%`,
                     }}
                   >
                     <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full" />
@@ -1100,7 +1150,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     </span>
                   )}
                   <span className="text-zinc-500 ml-auto text-[10px]">
-                    Step: {job?.status || 'processing'} • 6x Multi-fragment acceleration active
+                    Step: {displayProgress >= 100 ? 'complete' : (job?.status || 'processing')} • 6x Multi-fragment acceleration active
                   </span>
                 </div>
               </div>
@@ -1878,13 +1928,13 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           {job?.stage || 'Connecting video stream...'}
                         </span>
                         <span className="text-[10px] text-zinc-400">
-                          {job?.downloadProgress?.percent ? `${Math.round(job.downloadProgress.percent)}%` : `${job?.progress || 30}%`}
+                          {Math.round(displayProgress)}%
                           {job?.downloadProgress?.speed ? ` • ${job.downloadProgress.speed}` : ''}
                         </span>
                         <div className="w-36 h-1.5 rounded-full bg-zinc-800 overflow-hidden mt-1">
                           <div
-                            className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full"
-                            style={{ width: `${Math.max(10, job?.downloadProgress?.percent || job?.progress || 30)}%` }}
+                            className="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 transition-all duration-200 ease-out rounded-full"
+                            style={{ width: `${Math.min(100, Math.max(1, displayProgress))}%` }}
                           />
                         </div>
                       </div>

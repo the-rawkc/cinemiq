@@ -318,8 +318,8 @@ export const ShortsService = {
     const job: ShortsJob = {
       id: jobId,
       status: 'pending',
-      progress: 0,
-      stage: 'Initializing video analysis...',
+      progress: 5,
+      stage: 'Connecting to YouTube and initializing stream...',
     };
     activeJobs.set(jobId, job);
 
@@ -362,6 +362,9 @@ export const ShortsService = {
     const uploadsDir = getUploadsDir();
 
     // 1. Fetch metadata immediately (fast ~1-2 seconds)
+    job.progress = 10;
+    job.stage = 'Connecting to YouTube and reading video metadata...';
+
     let videoInfo: VideoInfo;
     try {
       videoInfo = await this.getVideoInfo(url);
@@ -383,6 +386,9 @@ export const ShortsService = {
     }
 
     // 2. Generate AI clips immediately so user sees viral highlights in ~2 seconds!
+    job.progress = 25;
+    job.stage = 'Scanning timeline & detecting high-retention viral moments...';
+
     const earlyClips = await this.detectViralMoments(
       videoInfo,
       [],
@@ -391,6 +397,9 @@ export const ShortsService = {
     );
     job.clips = earlyClips;
     job.generationTimeMs = Date.now() - jobStartTime;
+
+    job.progress = 45;
+    job.stage = `Identified ${earlyClips.length} viral highlights! Checking stream cache...`;
 
     // Check if we already have this video stream downloaded on disk (Instant 0s Local Cache)
     const sanitizedId = (videoInfo.id || jobId).replace(/[^a-zA-Z0-9_\-]/g, '');
@@ -445,7 +454,7 @@ export const ShortsService = {
     // 3. Fast progressive stream download with parallel connections & direct write
     job.status = 'downloading';
     job.stage = 'Highlights identified! Accelerating stream for preview...';
-    job.progress = 25;
+    job.progress = 50;
     job.downloadStartTime = Date.now();
 
     await new Promise<void>((resolve, reject) => {
@@ -489,7 +498,7 @@ export const ShortsService = {
             const totalSize = fullMatch[2];
             const speed = fullMatch[3];
             const eta = fullMatch[4];
-            job.progress = Math.min(85, Math.round(25 + (pct * 0.60)));
+            job.progress = Math.min(95, Math.round(50 + (pct * 0.45)));
             job.stage = `Downloading stream: ${pct.toFixed(0)}% • ${speed} (ETA ${eta})`;
             job.downloadProgress = {
               percent: pct,
@@ -504,7 +513,7 @@ export const ShortsService = {
           const pMatch = line.match(/(\d{1,3}\.\d)%/);
           if (pMatch) {
             const pct = parseFloat(pMatch[1]);
-            job.progress = Math.min(85, Math.round(25 + (pct * 0.60)));
+            job.progress = Math.min(95, Math.round(50 + (pct * 0.45)));
             job.stage = `Downloading video (${pct.toFixed(0)}%)...`;
             if (!job.downloadProgress) {
               job.downloadProgress = { percent: pct };
