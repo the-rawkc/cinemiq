@@ -23,7 +23,9 @@ import {
   Rewind,
   Archive,
   Zap,
-  Maximize2
+  Maximize2,
+  FolderDown,
+  FolderOpen
 } from 'lucide-react';
 import { API_URL } from '../../config';
 
@@ -121,6 +123,13 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [batchProgressMsg, setBatchProgressMsg] = useState('');
   const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
   const [renderingClipId, setRenderingClipId] = useState<string | null>(null);
+
+  // Direct Folder Export State (No ZIP - Saves directly to directory)
+  const [targetResolution, setTargetResolution] = useState<'720p' | '1080p'>('720p');
+  const [isFolderExporting, setIsFolderExporting] = useState(false);
+  const [folderProgressMsg, setFolderProgressMsg] = useState('');
+  const [exportedFolderPath, setExportedFolderPath] = useState<string | null>(null);
+  const [exportedClips, setExportedClips] = useState<Array<{ title: string; filename: string; url: string; duration: number }>>([]);
 
   // Video Preview & Player Controls State
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -426,6 +435,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           endTime,
           aspectRatio,
           headlineText,
+          targetResolution,
         }),
       });
 
@@ -473,6 +483,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         body: JSON.stringify({
           jobId: job.id,
           aspectRatio,
+          targetResolution,
           customHeadlines,
           clipTrims,
         }),
@@ -525,6 +536,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           endTime: currentEnd,
           aspectRatio,
           headlineText: currentHeadline,
+          targetResolution,
         }),
       });
 
@@ -554,6 +566,116 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       setErrorMessage(err.message || 'Failed to render short.');
     } finally {
       setIsRendering(false);
+    }
+  };
+
+  // 1-Click Save Directly to a Folder on User's Computer (Zero ZIP)
+  const handleSaveDirectlyToFolder = async () => {
+    if (!job?.id || clips.length === 0) return;
+
+    setIsFolderExporting(true);
+    setFolderProgressMsg('Preparing folder export and rendering clips...');
+    setErrorMessage(null);
+
+    try {
+      // Check if browser supports showDirectoryPicker (Chrome, Edge, Brave, Opera)
+      let dirHandle: any = null;
+      const hasDirectoryPicker = typeof (window as any).showDirectoryPicker === 'function';
+      if (hasDirectoryPicker) {
+        try {
+          dirHandle = await (window as any).showDirectoryPicker({
+            mode: 'readwrite',
+            startIn: 'downloads',
+          });
+        } catch (pickErr: any) {
+          if (pickErr.name === 'AbortError') {
+            setIsFolderExporting(false);
+            return; // user cancelled picker
+          }
+          console.warn('Directory picker fallback:', pickErr);
+        }
+      }
+
+      setFolderProgressMsg('Rendering all shorts in ultrafast mode...');
+      const res = await fetch(`${API_URL}/api/shorts/export-folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: job.id,
+          aspectRatio,
+          targetResolution,
+          customHeadlines,
+          clipTrims,
+        }),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        let errorMsg = `Folder export failed (${res.status})`;
+        if (contentType.includes('application/json')) {
+          const errData = await res.json().catch(() => null);
+          if (errData?.error) errorMsg = errData.error;
+        }
+        throw new Error(errorMsg);
+      }
+
+      const data = await res.json();
+      if (!data.success || !Array.isArray(data.clips)) {
+        throw new Error(data.error || 'Failed to export folder');
+      }
+
+      setExportedFolderPath(data.folderPath);
+      setExportedClips(data.clips);
+
+      if (dirHandle) {
+        // Stream each MP4 file directly into the user's picked directory
+        for (let i = 0; i < data.clips.length; i++) {
+          const item = data.clips[i];
+          setFolderProgressMsg(`Saving "${item.filename}" (${i + 1}/${data.clips.length}) directly into folder...`);
+          const fileRes = await fetch(`${API_URL}${item.url}`);
+          const fileBlob = await fileRes.blob();
+          const fileHandle = await dirHandle.getFileHandle(item.filename, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(fileBlob);
+          await writable.close();
+        }
+        setFolderProgressMsg(`✅ All ${data.clips.length} shorts saved directly into your folder!`);
+      } else {
+        // Fallback for browsers without File System Access API: trigger direct loose file downloads
+        setFolderProgressMsg(`Downloading ${data.clips.length} loose MP4 files directly to your downloads...`);
+        for (let i = 0; i < data.clips.length; i++) {
+          const item = data.clips[i];
+          triggerBrowserDownload(`${API_URL}${item.url}`, item.filename);
+          await new Promise((r) => setTimeout(r, 350));
+        }
+        setFolderProgressMsg(`✅ All ${data.clips.length} loose shorts downloaded directly!`);
+      }
+    } catch (err: any) {
+      console.error('Folder export error:', err);
+      setErrorMessage(err.message || 'Failed to save to folder.');
+    } finally {
+      setIsFolderExporting(false);
+    }
+  };
+
+  // Open the local directory directly in Windows File Explorer / OS file manager
+  const handleOpenServerFolder = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/shorts/open-folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: job?.id,
+          folderPath: exportedFolderPath,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Could not open folder on server');
+      }
+    } catch (err: any) {
+      console.error('Open folder error:', err);
+      setErrorMessage('Could not open folder directly. Files are stored at: ' + (exportedFolderPath || 'uploads/shorts/'));
     }
   };
 
@@ -961,41 +1083,135 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 </div>
               )}
 
-              {/* Batch Export All Clips Hero Banner */}
-              <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/70 via-zinc-900 to-teal-950/70 border border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg shadow-emerald-950/40">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
-                    <Archive size={20} />
+              {/* Batch Export All Clips Hero Banner with Direct Folder & ZIP */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-950/70 via-zinc-900 to-indigo-950/70 border border-blue-500/40 flex flex-col gap-3.5 shadow-xl shadow-blue-950/40">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+                      <FolderDown size={22} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-black uppercase tracking-wider text-blue-300">
+                          Export All {clips.length} Shorts
+                        </h3>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold">
+                          Direct Folder or ZIP
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 mt-0.5">
+                        Save all clips directly into a folder on your computer without extracting ZIP, or download as an archive.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-emerald-300">
-                      Batch Export All Clips (ZIP)
-                    </h3>
-                    <p className="text-[10px] text-zinc-400">
-                      Render and package all {clips.length} shorts into a single ZIP archive in 1 click
-                    </p>
+
+                  {/* Speed & Resolution Switcher */}
+                  <div className="flex items-center gap-1.5 p-1 rounded-xl bg-zinc-950/80 border border-zinc-800 shrink-0 text-[11px]">
+                    <span className="text-zinc-500 font-bold px-2 text-[10px] uppercase">Quality:</span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetResolution('720p')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                        targetResolution === '720p'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                      title="Renders in ~2s per clip (Native 9:16 HD - 3MB/clip)"
+                    >
+                      ⚡ Fast 720p HD (3x Speed)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetResolution('1080p')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                        targetResolution === '1080p'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                      title="Full HD (1080x1920)"
+                    >
+                      1080p FHD
+                    </button>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleDownloadAllZip}
-                  disabled={isBatchRendering}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 disabled:opacity-50 text-black font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 active:scale-95 transition-all shrink-0 cursor-pointer"
-                >
-                  {isBatchRendering ? (
-                    <>
-                      <RefreshCw size={14} className="animate-spin text-black" />
-                      <span>{batchProgressMsg || 'Packaging ZIP...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Zap size={14} className="fill-black" />
-                      <span>Download All ({clips.length}) Shorts (ZIP)</span>
-                    </>
+                {/* Primary Export Action Buttons */}
+                <div className="flex items-center flex-wrap gap-2.5 pt-1">
+                  {/* Option 1: Direct Folder Save (No ZIP) */}
+                  <button
+                    type="button"
+                    onClick={handleSaveDirectlyToFolder}
+                    disabled={isFolderExporting}
+                    className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 disabled:opacity-50 text-white font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
+                  >
+                    {isFolderExporting ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin text-white" />
+                        <span>{folderProgressMsg || 'Saving directly into folder...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <FolderDown size={15} />
+                        <span>📁 Save All ({clips.length}) Directly to Folder (No ZIP)</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Option 2: Download All as Single ZIP */}
+                  <button
+                    type="button"
+                    onClick={handleDownloadAllZip}
+                    disabled={isBatchRendering}
+                    className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 disabled:opacity-50 text-zinc-300 hover:text-white font-bold text-xs tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                  >
+                    {isBatchRendering ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin text-zinc-400" />
+                        <span>{batchProgressMsg || 'Packaging ZIP...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Archive size={14} className="text-emerald-400" />
+                        <span>Download as ZIP Archive</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Option 3: Open Output Folder in Windows File Explorer */}
+                  {exportedFolderPath && (
+                    <button
+                      type="button"
+                      onClick={handleOpenServerFolder}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-bold text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer"
+                      title="Open folder directly in Windows Explorer"
+                    >
+                      <FolderOpen size={14} />
+                      <span>Open in File Explorer 📂</span>
+                    </button>
                   )}
-                </button>
+                </div>
               </div>
+
+              {/* Folder Export Success Alert */}
+              {exportedClips.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-blue-950/50 border border-blue-500/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2 text-blue-300 font-bold truncate">
+                    <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                    <span className="truncate">
+                      {folderProgressMsg || `All ${exportedClips.length} clips exported to folder successfully!`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleOpenServerFolder}
+                      className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white font-bold text-[10px] tracking-wider transition-all"
+                    >
+                      Show Folder on Computer
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Ready ZIP Download Alert */}
               {batchDownloadUrl && (
@@ -1478,12 +1694,32 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
                 {/* Primary Action Buttons */}
                 <div className="w-full flex flex-col gap-2.5">
+                  {/* Option 1: Direct Folder Save (No ZIP) */}
+                  <button
+                    type="button"
+                    onClick={handleSaveDirectlyToFolder}
+                    disabled={isFolderExporting}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
+                  >
+                    {isFolderExporting ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin text-white" />
+                        <span>{folderProgressMsg || 'Saving directly into folder...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <FolderDown size={15} />
+                        <span>📁 Save All ({clips.length}) Directly to Folder (No ZIP)</span>
+                      </>
+                    )}
+                  </button>
+
                   {/* Single Short Fast Render & Download */}
                   <button
                     type="button"
                     onClick={handleRenderShort}
                     disabled={isRendering}
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-rose-500/25 active:scale-95 transition-all cursor-pointer"
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-rose-500/25 active:scale-95 transition-all cursor-pointer"
                   >
                     {isRendering ? (
                       <>
@@ -1493,7 +1729,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     ) : (
                       <>
                         <Zap size={15} />
-                        <span>⚡ Fast Render & Download This Short (MP4)</span>
+                        <span>⚡ Fast Download This Short (MP4)</span>
                       </>
                     )}
                   </button>
@@ -1503,7 +1739,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     type="button"
                     onClick={handleDownloadAllZip}
                     disabled={isBatchRendering}
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-95 transition-all cursor-pointer"
+                    className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 disabled:opacity-50 text-zinc-300 hover:text-white text-xs font-bold tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
                   >
                     {isBatchRendering ? (
                       <>
@@ -1512,11 +1748,22 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       </>
                     ) : (
                       <>
-                        <Archive size={15} />
-                        <span>📦 Download All ({clips.length}) Shorts at Once (ZIP)</span>
+                        <Archive size={14} className="text-emerald-400" />
+                        <span>Download as ZIP Archive</span>
                       </>
                     )}
                   </button>
+
+                  {exportedFolderPath && (
+                    <button
+                      type="button"
+                      onClick={handleOpenServerFolder}
+                      className="w-full py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                    >
+                      <FolderOpen size={14} />
+                      <span>Open Folder in File Explorer 📂</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"

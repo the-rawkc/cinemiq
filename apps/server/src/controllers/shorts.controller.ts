@@ -158,6 +158,72 @@ export const ShortsController = {
   },
 
   /**
+   * Render and save all clips into a dedicated directory on disk (no zip),
+   * returning clean direct file URLs for browser folder streaming or direct access.
+   */
+  async exportFolder(req: Request, res: Response): Promise<void> {
+    try {
+      const {
+        jobId,
+        aspectRatio = '9:16-blur',
+        targetResolution = '720p',
+        customHeadlines = {},
+        clipTrims = {},
+      } = req.body;
+
+      if (!jobId) {
+        res.status(400).json({ error: 'jobId is required' });
+        return;
+      }
+
+      console.log(`📁 [Shorts] Exporting all clips to folder for job: ${jobId}`);
+
+      const result = await ShortsService.exportAllClipsFolder({
+        jobId,
+        aspectRatio,
+        targetResolution,
+        customHeadlines,
+        clipTrims,
+      });
+
+      res.json({
+        success: true,
+        folderName: result.folderName,
+        folderPath: result.folderPath,
+        totalClips: result.totalClips,
+        clips: result.clips,
+      });
+    } catch (err: any) {
+      console.error('Export folder error:', err);
+      res.status(500).json({ error: err.message || 'Failed to export folder' });
+    }
+  },
+
+  /**
+   * Open the exported folder directly in the system file explorer (Windows / Mac / Linux)
+   */
+  async openFolder(req: Request, res: Response): Promise<void> {
+    try {
+      const { folderPath, jobId } = req.body;
+      let targetDir = folderPath;
+      if (!targetDir && jobId) {
+        targetDir = path.resolve(process.cwd(), 'uploads', 'shorts', `${jobId}-shorts`);
+      }
+
+      if (!targetDir || !fs.existsSync(targetDir)) {
+        res.status(404).json({ error: 'Target folder does not exist on disk' });
+        return;
+      }
+
+      ShortsService.openSystemFolder(targetDir);
+      res.json({ success: true, opened: true, folderPath: targetDir });
+    } catch (err: any) {
+      console.error('Open folder error:', err);
+      res.status(500).json({ error: err.message || 'Failed to open folder' });
+    }
+  },
+
+  /**
    * Upload a local video file and kick off highlight analysis
    */
   async uploadLocal(req: Request, res: Response): Promise<void> {

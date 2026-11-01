@@ -41,6 +41,12 @@ router.post('/render-clip', ShortsController.renderClip);
 // Render & Download All Clips in a Single ZIP Archive
 router.post('/download-all-zip', ShortsController.downloadAllZip);
 
+// Render and export all clips into a dedicated loose folder on disk (no zip)
+router.post('/export-folder', ShortsController.exportFolder);
+
+// Open exported folder directly in system File Explorer (Windows explorer / Mac Finder / Linux)
+router.post('/open-folder', ShortsController.openFolder);
+
 // Upload Local Video directly
 router.post('/upload-local', upload.single('video'), ShortsController.uploadLocal);
 
