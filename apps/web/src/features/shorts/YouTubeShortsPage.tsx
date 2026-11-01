@@ -127,7 +127,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [phonePreviewSize, setPhonePreviewSize] = useState<'compact' | 'standard' | 'large'>('large');
   const [customHeadlines, setCustomHeadlines] = useState<Record<string, string>>({});
   const [clipTrims, setClipTrims] = useState<Record<string, { start: number; end: number }>>({});
-  const [copiedTag, setCopiedTag] = useState(false);
   const [copiedAllHashtags, setCopiedAllHashtags] = useState(false);
   const [copiedTagText, setCopiedTagText] = useState<string | null>(null);
   const [mobileViewTab, setMobileViewTab] = useState<'clips' | 'preview'>('clips');
@@ -781,13 +780,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     onLoadProject(project);
   };
 
-  // Copy hashtags helper
-  const handleCopyTags = (tags: string[]) => {
-    navigator.clipboard.writeText(tags.join(' '));
-    setCopiedTag(true);
-    setTimeout(() => setCopiedTag(false), 2000);
-  };
-
   // Helper formatting for seconds to mm:ss
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -1150,32 +1142,32 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
             <div className={`flex-col gap-4 ${mobileViewTab === 'preview' ? 'hidden lg:flex lg:col-span-7' : 'flex lg:col-span-7'}`}>
               {/* Video Info Header Card */}
               {job.videoInfo && (
-                <div className="p-4 rounded-xl bg-zinc-950/50 border border-zinc-850 flex items-center gap-4">
+                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-850 flex items-center gap-3">
                   {job.videoInfo.thumbnail ? (
                     <img
                       src={job.videoInfo.thumbnail}
                       alt={job.videoInfo.title}
-                      className="w-24 h-16 object-cover rounded-lg border border-zinc-800"
+                      className="w-20 h-13.5 object-cover rounded-lg border border-zinc-800 shrink-0"
                     />
                   ) : (
-                    <div className="w-24 h-16 bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-600">
-                      <Tv size={20} />
+                    <div className="w-20 h-13.5 bg-zinc-900 rounded-lg flex items-center justify-center text-zinc-600 shrink-0">
+                      <Tv size={18} />
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-850 text-zinc-400 font-bold uppercase">
+                      <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-zinc-850 text-zinc-400 font-bold uppercase">
                         {job.videoInfo.channel}
                       </span>
-                      <span className="text-[10px] text-zinc-500">
+                      <span className="text-[9.5px] text-zinc-500">
                         {formatTime(job.videoInfo.duration)} total duration
                       </span>
                     </div>
-                    <h2 className="text-xs md:text-sm font-bold text-zinc-200 truncate mt-1">
+                    <h2 className="text-xs md:text-[13px] font-bold text-zinc-200 truncate mt-0.5">
                       {job.videoInfo.title}
                     </h2>
-                    <p className="text-[10px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
-                      <CheckCircle2 size={11} />
+                    <p className="text-[9.5px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
+                      <CheckCircle2 size={10} />
                       <span>
                         {clips.length} viral shorts extracted across timeline
                         {job.videoInfo.duration > 1800 ? ' • Long-Form Video Optimized' : ''}
@@ -1186,47 +1178,47 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
               )}
 
               {/* Timing & Telemetry Performance HUD */}
-              <div className="p-3 sm:p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-4 flex-wrap">
+              <div className="p-2.5 px-3 rounded-xl bg-zinc-950/70 border border-zinc-800 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                <div className="flex items-center gap-3.5 flex-wrap">
                   {/* AI Generation Timing */}
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                      <Zap size={13} />
+                    <div className="w-5 h-5 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                      <Zap size={11} />
                     </div>
                     <div>
-                      <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">AI Generation Time</div>
-                      <div className="font-mono font-black text-amber-300 text-xs">
+                      <div className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider">AI Generation Time</div>
+                      <div className="font-mono font-black text-amber-300 text-[11px]">
                         {job.generationTimeMs ? `${(job.generationTimeMs / 1000).toFixed(1)}s` : '1.8s'}
-                        <span className="text-[10px] text-zinc-500 font-normal ml-1">({clips.length} viral clips)</span>
+                        <span className="text-[9.5px] text-zinc-500 font-normal ml-1">({clips.length} viral clips)</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="h-6 w-px bg-zinc-800 hidden sm:block" />
+                  <div className="h-5 w-px bg-zinc-800 hidden sm:block" />
 
                   {/* Video Download / Stream Timing */}
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                      <Clock size={13} />
+                    <div className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                      <Clock size={11} />
                     </div>
                     <div>
-                      <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Stream & Download Time</div>
-                      <div className="font-mono font-black text-emerald-400 text-xs">
+                      <div className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider">Stream & Download Time</div>
+                      <div className="font-mono font-black text-emerald-400 text-[11px]">
                         {job.isCachedSource || job.downloadTimeMs === 0 ? (
                           <span className="text-emerald-300 flex items-center gap-1">
                             <span>⚡ 0.0s</span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">Instant Local Cache</span>
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">Instant Local Cache</span>
                           </span>
                         ) : job.status === 'downloading' ? (
                           <span className="text-rose-400 animate-pulse flex items-center gap-1">
                             <span>{job.downloadProgress?.percent ? `${Math.round(job.downloadProgress.percent)}%` : 'Streaming'}</span>
-                            {job.downloadProgress?.speed && <span className="text-[10px] text-zinc-400">({job.downloadProgress.speed})</span>}
-                            {job.downloadProgress?.eta && <span className="text-[10px] text-zinc-500">ETA {job.downloadProgress.eta}</span>}
+                            {job.downloadProgress?.speed && <span className="text-[9px] text-zinc-400">({job.downloadProgress.speed})</span>}
+                            {job.downloadProgress?.eta && <span className="text-[9px] text-zinc-500">ETA {job.downloadProgress.eta}</span>}
                           </span>
                         ) : job.downloadTimeMs ? (
                           <span className="text-emerald-300">
                             {(job.downloadTimeMs / 1000).toFixed(1)}s
-                            <span className="text-[10px] text-zinc-500 font-normal ml-1">completed</span>
+                            <span className="text-[9.5px] text-zinc-500 font-normal ml-1">completed</span>
                           </span>
                         ) : (
                           <span className="text-emerald-300">Ready</span>
@@ -1237,7 +1229,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
                     job.status === 'downloading'
                       ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
                       : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
@@ -1249,22 +1241,22 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
               {/* Viral Upload Hashtags & Description Kit */}
               {((job.hashtags && job.hashtags.length > 0) || (activeClip?.tags && activeClip.tags.length > 0)) && (
-                <div className="p-4 rounded-xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-rose-500/30 flex flex-col gap-2.5 shadow-lg shadow-rose-950/20">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="p-3 rounded-xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-rose-500/25 flex flex-col gap-2 shadow-md shadow-rose-950/15">
+                  <div className="flex items-center justify-between gap-2.5 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-                        <Hash size={13} />
+                      <div className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                        <Hash size={12} />
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black uppercase tracking-wider text-rose-300">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-black uppercase tracking-wider text-rose-300">
                             Viral Shorts & Reels Hashtags
                           </span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
                             SEO Optimized
                           </span>
                         </div>
-                        <p className="text-[10px] text-zinc-400 mt-0.5">
+                        <p className="text-[9.5px] text-zinc-400">
                           Use these trending tags when uploading any of your shorts to YouTube, Instagram Reels, or TikTok.
                         </p>
                       </div>
@@ -1273,16 +1265,16 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     <button
                       type="button"
                       onClick={handleCopyAllHashtags}
-                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 active:scale-95 text-white font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-rose-600/30 shrink-0"
+                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 active:scale-95 text-white font-bold text-[10.5px] flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-rose-600/30 shrink-0"
                     >
                       {copiedAllHashtags ? (
                         <>
-                          <Check size={13} className="text-white" />
+                          <Check size={11} className="text-white" />
                           <span>Copied All Hashtags!</span>
                         </>
                       ) : (
                         <>
-                          <Copy size={13} />
+                          <Copy size={11} />
                           <span>Copy All Hashtags (1-Click)</span>
                         </>
                       )}
@@ -1290,13 +1282,13 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                   </div>
 
                   {/* Hashtag Chips Grid */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1 max-h-24 overflow-y-auto">
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5 max-h-20 overflow-y-auto">
                     {(job.hashtags && job.hashtags.length > 0 ? job.hashtags : (activeClip?.tags || [])).map((tag, idx) => (
                       <button
                         key={idx}
                         type="button"
                         onClick={() => handleCopySingleTag(tag)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer border ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono transition-all cursor-pointer border ${
                           copiedTagText === (tag.startsWith('#') ? tag : `#${tag}`)
                             ? 'bg-rose-500 text-white border-rose-400'
                             : 'bg-zinc-900/90 hover:bg-zinc-800 border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-white'
@@ -1311,46 +1303,46 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
               )}
 
               {/* Batch Export All Clips Hero Banner with Direct Folder & ZIP */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-950/70 via-zinc-900 to-indigo-950/70 border border-blue-500/40 flex flex-col gap-3.5 shadow-xl shadow-blue-950/40">
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
-                      <FolderDown size={22} />
+              <div className="p-3 sm:p-3.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-zinc-900 to-indigo-950/60 border border-blue-500/35 flex flex-col gap-2.5 shadow-lg shadow-blue-950/30">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+                      <FolderDown size={18} />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-xs font-black uppercase tracking-wider text-blue-300">
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-[11px] font-black uppercase tracking-wider text-blue-300">
                           Export All {clips.length} Shorts
                         </h3>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold">
+                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold">
                           Direct Folder or ZIP
                         </span>
                       </div>
-                      <p className="text-[10px] text-zinc-400 mt-0.5">
-                        Save all clips directly into a folder on your computer without extracting ZIP, or download as an archive.
+                      <p className="text-[9.5px] text-zinc-400 mt-0.5">
+                        Save all clips directly into a folder on your computer without extracting ZIP, or download archive.
                       </p>
                     </div>
                   </div>
 
                   {/* Speed & Resolution Switcher */}
-                  <div className="flex items-center gap-1.5 p-1 rounded-xl bg-zinc-950/80 border border-zinc-800 shrink-0 text-[11px]">
-                    <span className="text-zinc-500 font-bold px-2 text-[10px] uppercase">Quality:</span>
+                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-zinc-950/80 border border-zinc-800 shrink-0 text-[10px]">
+                    <span className="text-zinc-500 font-bold px-1.5 text-[9px] uppercase">Quality:</span>
                     <button
                       type="button"
                       onClick={() => setTargetResolution('720p')}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                      className={`px-2 py-0.5 rounded-md font-bold transition-all ${
                         targetResolution === '720p'
                           ? 'bg-blue-600 text-white shadow-sm'
                           : 'text-zinc-400 hover:text-white'
                       }`}
                       title="Renders in ~2s per clip (Native 9:16 HD - 3MB/clip)"
                     >
-                      ⚡ Fast 720p HD (3x Speed)
+                      ⚡ Fast 720p HD
                     </button>
                     <button
                       type="button"
                       onClick={() => setTargetResolution('1080p')}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                      className={`px-2 py-0.5 rounded-md font-bold transition-all ${
                         targetResolution === '1080p'
                           ? 'bg-blue-600 text-white shadow-sm'
                           : 'text-zinc-400 hover:text-white'
@@ -1363,22 +1355,22 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 </div>
 
                 {/* Primary Export Action Buttons */}
-                <div className="flex items-center flex-wrap gap-2.5 pt-1">
+                <div className="flex items-center flex-wrap gap-2 pt-0.5">
                   {/* Option 1: Direct Folder Save (No ZIP) */}
                   <button
                     type="button"
                     onClick={handleSaveDirectlyToFolder}
                     disabled={isFolderExporting}
-                    className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 disabled:opacity-50 text-white font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
+                    className="flex-1 sm:flex-none px-4 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 disabled:opacity-50 text-white font-black uppercase text-[11px] tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
                   >
                     {isFolderExporting ? (
                       <>
-                        <RefreshCw size={14} className="animate-spin text-white" />
+                        <RefreshCw size={13} className="animate-spin text-white" />
                         <span>{folderProgressMsg || 'Saving directly into folder...'}</span>
                       </>
                     ) : (
                       <>
-                        <FolderDown size={15} />
+                        <FolderDown size={14} />
                         <span>📁 Save All ({clips.length}) Directly to Folder (No ZIP)</span>
                       </>
                     )}
@@ -1389,16 +1381,16 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     type="button"
                     onClick={handleDownloadAllZip}
                     disabled={isBatchRendering}
-                    className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 disabled:opacity-50 text-zinc-300 hover:text-white font-bold text-xs tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                    className="flex-1 sm:flex-none px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 disabled:opacity-50 text-zinc-300 hover:text-white font-bold text-[11px] tracking-wider flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
                   >
                     {isBatchRendering ? (
                       <>
-                        <RefreshCw size={14} className="animate-spin text-zinc-400" />
+                        <RefreshCw size={13} className="animate-spin text-zinc-400" />
                         <span>{batchProgressMsg || 'Packaging ZIP...'}</span>
                       </>
                     ) : (
                       <>
-                        <Archive size={14} className="text-emerald-400" />
+                        <Archive size={13} className="text-emerald-400" />
                         <span>Download as ZIP Archive</span>
                       </>
                     )}
@@ -1409,10 +1401,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     <button
                       type="button"
                       onClick={handleOpenServerFolder}
-                      className="px-4 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-bold text-xs flex items-center gap-2 active:scale-95 transition-all cursor-pointer"
+                      className="px-3.5 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-bold text-[11px] flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
                       title="Open folder directly in Windows Explorer"
                     >
-                      <FolderOpen size={14} />
+                      <FolderOpen size={13} />
                       <span>Open in File Explorer 📂</span>
                     </button>
                   )}
@@ -1421,15 +1413,15 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
               {/* Folder Export Active Progress Alert */}
               {isFolderExporting && (
-                <div className="p-4 rounded-xl bg-blue-950/60 border border-blue-500/40 flex flex-col gap-2.5 text-xs animate-in fade-in">
+                <div className="p-3 rounded-xl bg-blue-950/60 border border-blue-500/40 flex flex-col gap-2 text-xs animate-in fade-in">
                   <div className="flex items-center justify-between font-bold">
-                    <div className="flex items-center gap-2 text-blue-300">
-                      <RefreshCw size={14} className="animate-spin text-blue-400" />
+                    <div className="flex items-center gap-2 text-blue-300 text-[11px]">
+                      <RefreshCw size={13} className="animate-spin text-blue-400" />
                       <span>{folderProgressMsg || 'Exporting shorts directly to folder...'}</span>
                     </div>
-                    <span className="font-mono text-blue-400 text-sm font-black">{folderSavePercent}%</span>
+                    <span className="font-mono text-blue-400 text-xs font-black">{folderSavePercent}%</span>
                   </div>
-                  <div className="w-full h-2 rounded-full bg-zinc-900 overflow-hidden">
+                  <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
                     <div
                       className="h-full bg-gradient-to-r from-blue-500 to-indigo-400 transition-all duration-300 rounded-full"
                       style={{ width: `${Math.max(5, folderSavePercent)}%` }}
@@ -1438,137 +1430,12 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 </div>
               )}
 
-              {/* Timing & Telemetry Performance HUD */}
-              <div className="p-3 sm:p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-4 flex-wrap">
-                  {/* AI Generation Timing */}
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                      <Zap size={13} />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">AI Generation Time</div>
-                      <div className="font-mono font-black text-amber-300 text-xs">
-                        {job.generationTimeMs ? `${(job.generationTimeMs / 1000).toFixed(1)}s` : '1.8s'}
-                        <span className="text-[10px] text-zinc-500 font-normal ml-1">({clips.length} viral clips)</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="h-6 w-px bg-zinc-800 hidden sm:block" />
-
-                  {/* Video Download / Stream Timing */}
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                      <Clock size={13} />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Stream & Download Time</div>
-                      <div className="font-mono font-black text-emerald-400 text-xs">
-                        {job.isCachedSource || job.downloadTimeMs === 0 ? (
-                          <span className="text-emerald-300 flex items-center gap-1">
-                            <span>⚡ 0.0s</span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">Instant Local Cache</span>
-                          </span>
-                        ) : job.status === 'downloading' ? (
-                          <span className="text-rose-400 animate-pulse flex items-center gap-1">
-                            <span>{job.downloadProgress?.percent ? `${Math.round(job.downloadProgress.percent)}%` : 'Streaming'}</span>
-                            {job.downloadProgress?.speed && <span className="text-[10px] text-zinc-400">({job.downloadProgress.speed})</span>}
-                            {job.downloadProgress?.eta && <span className="text-[10px] text-zinc-500">ETA {job.downloadProgress.eta}</span>}
-                          </span>
-                        ) : job.downloadTimeMs ? (
-                          <span className="text-emerald-300">
-                            {(job.downloadTimeMs / 1000).toFixed(1)}s
-                            <span className="text-[10px] text-zinc-500 font-normal ml-1">completed</span>
-                          </span>
-                        ) : (
-                          <span className="text-emerald-300">Ready</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
-                    job.status === 'downloading'
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
-                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                  }`}>
-                    {job.status === 'downloading' ? 'Streaming video in background...' : 'Ready for Export & Preview'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Viral Upload Hashtags & Description Kit */}
-              {((job.hashtags && job.hashtags.length > 0) || (activeClip?.tags && activeClip.tags.length > 0)) && (
-                <div className="p-4 rounded-xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-rose-500/30 flex flex-col gap-2.5 shadow-lg shadow-rose-950/20">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-                        <Hash size={13} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black uppercase tracking-wider text-rose-300">
-                            Viral Shorts & Reels Hashtags
-                          </span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
-                            SEO Optimized
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-zinc-400 mt-0.5">
-                          Use these trending tags when uploading any of your shorts to YouTube, Instagram Reels, or TikTok.
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleCopyAllHashtags}
-                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 active:scale-95 text-white font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-rose-600/30 shrink-0"
-                    >
-                      {copiedAllHashtags ? (
-                        <>
-                          <Check size={13} className="text-white" />
-                          <span>Copied All Hashtags!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={13} />
-                          <span>Copy All Hashtags (1-Click)</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Hashtag Chips Grid */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1 max-h-24 overflow-y-auto">
-                    {(job.hashtags && job.hashtags.length > 0 ? job.hashtags : (activeClip?.tags || [])).map((tag, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleCopySingleTag(tag)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer border ${
-                          copiedTagText === (tag.startsWith('#') ? tag : `#${tag}`)
-                            ? 'bg-rose-500 text-white border-rose-400'
-                            : 'bg-zinc-900/90 hover:bg-zinc-800 border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-white'
-                        }`}
-                        title="Click to copy single hashtag"
-                      >
-                        {tag.startsWith('#') ? tag : `#${tag}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Folder Export Success Alert */}
               {exportedClips.length > 0 && (
-                <div className="p-3.5 rounded-xl bg-blue-950/50 border border-blue-500/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs animate-in fade-in">
+                <div className="p-3 rounded-xl bg-blue-950/50 border border-blue-500/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs animate-in fade-in">
                   <div className="flex items-center gap-2 text-blue-300 font-bold truncate">
-                    <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">
+                    <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                    <span className="truncate text-[11px]">
                       {folderProgressMsg || `All ${exportedClips.length} clips exported to folder successfully!`}
                     </span>
                   </div>
@@ -1576,7 +1443,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     <button
                       type="button"
                       onClick={handleOpenServerFolder}
-                      className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white font-bold text-[10px] tracking-wider transition-all"
+                      className="px-2.5 py-1 rounded-lg bg-blue-500 hover:bg-blue-400 text-white font-bold text-[10px] tracking-wider transition-all cursor-pointer"
                     >
                       Show Folder on Computer
                     </button>
@@ -1584,144 +1451,19 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 </div>
               )}
 
-              {/* Timing & Telemetry Performance HUD */}
-              <div className="p-3 sm:p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-4 flex-wrap">
-                  {/* AI Generation Timing */}
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                      <Zap size={13} />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">AI Generation Time</div>
-                      <div className="font-mono font-black text-amber-300 text-xs">
-                        {job.generationTimeMs ? `${(job.generationTimeMs / 1000).toFixed(1)}s` : '1.8s'}
-                        <span className="text-[10px] text-zinc-500 font-normal ml-1">({clips.length} viral clips)</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="h-6 w-px bg-zinc-800 hidden sm:block" />
-
-                  {/* Video Download / Stream Timing */}
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                      <Clock size={13} />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Stream & Download Time</div>
-                      <div className="font-mono font-black text-emerald-400 text-xs">
-                        {job.isCachedSource || job.downloadTimeMs === 0 ? (
-                          <span className="text-emerald-300 flex items-center gap-1">
-                            <span>⚡ 0.0s</span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">Instant Local Cache</span>
-                          </span>
-                        ) : job.status === 'downloading' ? (
-                          <span className="text-rose-400 animate-pulse flex items-center gap-1">
-                            <span>{job.downloadProgress?.percent ? `${Math.round(job.downloadProgress.percent)}%` : 'Streaming'}</span>
-                            {job.downloadProgress?.speed && <span className="text-[10px] text-zinc-400">({job.downloadProgress.speed})</span>}
-                            {job.downloadProgress?.eta && <span className="text-[10px] text-zinc-500">ETA {job.downloadProgress.eta}</span>}
-                          </span>
-                        ) : job.downloadTimeMs ? (
-                          <span className="text-emerald-300">
-                            {(job.downloadTimeMs / 1000).toFixed(1)}s
-                            <span className="text-[10px] text-zinc-500 font-normal ml-1">completed</span>
-                          </span>
-                        ) : (
-                          <span className="text-emerald-300">Ready</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
-                    job.status === 'downloading'
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
-                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                  }`}>
-                    {job.status === 'downloading' ? 'Streaming video in background...' : 'Ready for Export & Preview'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Viral Upload Hashtags & Description Kit */}
-              {((job.hashtags && job.hashtags.length > 0) || (activeClip?.tags && activeClip.tags.length > 0)) && (
-                <div className="p-4 rounded-xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-rose-500/30 flex flex-col gap-2.5 shadow-lg shadow-rose-950/20">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-                        <Hash size={13} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black uppercase tracking-wider text-rose-300">
-                            Viral Shorts & Reels Hashtags
-                          </span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
-                            SEO Optimized
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-zinc-400 mt-0.5">
-                          Use these trending tags when uploading any of your shorts to YouTube, Instagram Reels, or TikTok.
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleCopyAllHashtags}
-                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 active:scale-95 text-white font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-rose-600/30 shrink-0"
-                    >
-                      {copiedAllHashtags ? (
-                        <>
-                          <Check size={13} className="text-white" />
-                          <span>Copied All Hashtags!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={13} />
-                          <span>Copy All Hashtags (1-Click)</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Hashtag Chips Grid */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1 max-h-24 overflow-y-auto">
-                    {(job.hashtags && job.hashtags.length > 0 ? job.hashtags : (activeClip?.tags || [])).map((tag, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleCopySingleTag(tag)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer border ${
-                          copiedTagText === (tag.startsWith('#') ? tag : `#${tag}`)
-                            ? 'bg-rose-500 text-white border-rose-400'
-                            : 'bg-zinc-900/90 hover:bg-zinc-800 border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-white'
-                        }`}
-                        title="Click to copy single hashtag"
-                      >
-                        {tag.startsWith('#') ? tag : `#${tag}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Ready ZIP Download Alert */}
               {batchDownloadUrl && (
-                <div className="p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-500/50 flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-500/50 flex items-center justify-between gap-2.5 text-xs animate-in fade-in">
                   <div className="flex items-center gap-2 text-emerald-400 font-bold truncate">
-                    <CheckCircle2 size={16} />
-                    <span>{batchProgressMsg || 'ZIP Archive Ready!'}</span>
+                    <CheckCircle2 size={15} />
+                    <span className="text-[11px]">{batchProgressMsg || 'ZIP Archive Ready!'}</span>
                   </div>
                   <a
                     href={batchDownloadUrl}
                     download={`cinemiq-shorts-${job.id}.zip`}
                     target="_blank"
                     rel="noreferrer"
-                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all"
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all"
                   >
                     Download ZIP Again
                   </a>
@@ -1729,25 +1471,25 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
               )}
 
               {/* Clips List */}
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2.5">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-black uppercase tracking-wider text-zinc-400">
+                  <h3 className="text-[11px] font-black uppercase tracking-wider text-zinc-400">
                     AI Highlight Clips ({clips.length})
                   </h3>
-                  <span className="text-[10px] text-zinc-500">
+                  <span className="text-[9.5px] text-zinc-500">
                     Ranked by predicted audience retention
                   </span>
                 </div>
 
                 {/* Quick jump navigator for 10-20 clips */}
                 {clips.length > 6 && (
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
+                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5 text-[9.5px]">
                     <span className="text-zinc-500 font-bold shrink-0">Jump to:</span>
                     {clips.map((c, idx) => (
                       <button
                         key={c.id}
                         onClick={() => setSelectedClipId(c.id)}
-                        className={`px-2 py-0.5 rounded font-mono font-bold shrink-0 transition-all ${
+                        className={`px-1.5 py-0.5 rounded font-mono font-bold shrink-0 transition-all ${
                           (selectedClipId === c.id || (!selectedClipId && idx === 0))
                             ? 'bg-rose-500 text-white shadow-sm'
                             : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
@@ -1770,30 +1512,30 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     <div
                       key={clip.id}
                       onClick={() => setSelectedClipId(clip.id)}
-                      className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col gap-3 ${
+                      className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col gap-2 ${
                         isSelected
-                          ? 'bg-zinc-900/90 border-rose-500/60 shadow-xl shadow-rose-500/5 ring-1 ring-rose-500/30'
+                          ? 'bg-zinc-900/90 border-rose-500/60 shadow-lg shadow-rose-500/5 ring-1 ring-rose-500/30'
                           : 'bg-zinc-950/40 border-zinc-850 hover:border-zinc-750 hover:bg-zinc-900/40'
                       }`}
                     >
                       {/* Top Row: Title + Virality Badge + 1-Click Download */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-2.5 min-w-0">
-                          <span className="w-5 h-5 rounded-md bg-zinc-850 text-zinc-400 flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <span className="w-4.5 h-4.5 rounded bg-zinc-850 text-zinc-400 flex items-center justify-center text-[9px] font-black shrink-0 mt-0.5">
                             #{index + 1}
                           </span>
                           <div className="min-w-0">
-                            <h4 className="text-xs font-bold text-zinc-100 truncate">
+                            <h4 className="text-[11.5px] font-bold text-zinc-100 truncate">
                               {clip.title}
                             </h4>
-                            <p className="text-[11px] text-zinc-400 italic mt-0.5 truncate">
+                            <p className="text-[10px] text-zinc-400 italic mt-0.5 truncate">
                               Hook: {clip.hook}
                             </p>
                           </div>
                         </div>
 
                         {/* Quick 1-click download button & Virality score */}
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1801,34 +1543,34 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                               handleDownloadSingleClip(clip);
                             }}
                             disabled={renderingClipId === clip.id}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-900 hover:bg-rose-500/20 border border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-rose-300 text-[10px] font-bold transition-all shrink-0 cursor-pointer"
+                            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-900 hover:bg-rose-500/20 border border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-rose-300 text-[9.5px] font-bold transition-all shrink-0 cursor-pointer"
                             title="1-Click Save Short (MP4)"
                           >
                             {renderingClipId === clip.id ? (
                               <>
-                                <RefreshCw size={11} className="animate-spin text-rose-400" />
+                                <RefreshCw size={10} className="animate-spin text-rose-400" />
                                 <span>Saving...</span>
                               </>
                             ) : (
                               <>
-                                <Download size={11} className="text-rose-400" />
+                                <Download size={10} className="text-rose-400" />
                                 <span>Save Short</span>
                               </>
                             )}
                           </button>
 
-                          <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-black shrink-0">
-                            <Flame size={12} className="text-rose-400" />
+                          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/40 text-amber-400 text-[9.5px] font-black shrink-0">
+                            <Flame size={10} className="text-rose-400" />
                             <span>{clip.viralityScore}%</span>
                           </div>
                         </div>
                       </div>
 
                       {/* Reason & Timestamp meta */}
-                      <div className="flex items-center justify-between text-[10px] text-zinc-500 pt-1 border-t border-zinc-850/60">
-                        <span className="text-zinc-400">{clip.reason}</span>
-                        <div className="flex items-center gap-1 font-mono text-zinc-400">
-                          <Clock size={11} />
+                      <div className="flex items-center justify-between text-[9px] text-zinc-500 pt-1 border-t border-zinc-850/60">
+                        <span className="text-zinc-400 truncate max-w-[65%]">{clip.reason}</span>
+                        <div className="flex items-center gap-1 font-mono text-zinc-400 shrink-0">
+                          <Clock size={10} />
                           <span>
                             {formatTime(clipStart)} - {formatTime(clipEnd)} ({duration}s)
                           </span>
@@ -1839,11 +1581,11 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       {isSelected && (
                         <div
                           onClick={(e) => e.stopPropagation()}
-                          className="pt-3 border-t border-zinc-800 flex flex-col gap-3"
+                          className="pt-2 border-t border-zinc-800 flex flex-col gap-2"
                         >
                           {/* Headline Overlay Text Editor */}
-                          <div className="flex flex-col gap-1">
-                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                          <div className="flex flex-col gap-0.5">
+                            <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">
                               Headline Banner Overlay:
                             </label>
                             <input
@@ -1856,14 +1598,14 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                                 })
                               }
                               placeholder="e.g. WAIT FOR WHAT HAPPENS NEXT 😱"
-                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-rose-500/60"
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-2.5 py-1 text-[11px] text-white placeholder-zinc-600 focus:outline-none focus:border-rose-500/60"
                             />
                           </div>
 
                           {/* Trimming Adjusters */}
-                          <div className="grid grid-cols-2 gap-3 text-xs">
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] text-zinc-500">
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[9px] text-zinc-500">
                                 Start Second:
                               </span>
                               <input
@@ -1881,12 +1623,12 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                                     },
                                   })
                                 }
-                                className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs focus:outline-none"
+                                className="bg-zinc-950 border border-zinc-800 rounded-md px-2 py-0.5 text-zinc-200 font-mono text-[11px] focus:outline-none"
                               />
                             </div>
 
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] text-zinc-500">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[9px] text-zinc-500">
                                 End Second:
                               </span>
                               <input
@@ -1903,23 +1645,23 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                                     },
                                   })
                                 }
-                                className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs focus:outline-none"
+                                className="bg-zinc-950 border border-zinc-800 rounded-md px-2 py-0.5 text-zinc-200 font-mono text-[11px] focus:outline-none"
                               />
                             </div>
                           </div>
 
                           {/* Quick Tag Copy */}
                           {clip.tags && clip.tags.length > 0 && (
-                            <div className="flex items-center justify-between text-[10px] text-zinc-500 pt-1">
-                              <span className="truncate max-w-[80%]">
+                            <div className="flex items-center justify-between text-[9px] text-zinc-500 pt-0.5">
+                              <span className="truncate max-w-[80%] font-mono">
                                 {clip.tags.join(' ')}
                               </span>
                               <button
-                                onClick={() => handleCopyTags(clip.tags)}
-                                className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors"
+                                onClick={() => handleCopySingleTag(clip.tags.join(' '))}
+                                className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors cursor-pointer"
                               >
-                                {copiedTag ? <Check size={11} /> : <Copy size={11} />}
-                                <span>{copiedTag ? 'Copied' : 'Copy'}</span>
+                                {copiedTagText === clip.tags.join(' ') ? <Check size={10} /> : <Copy size={10} />}
+                                <span>{copiedTagText === clip.tags.join(' ') ? 'Copied' : 'Copy'}</span>
                               </button>
                             </div>
                           )}
@@ -1928,9 +1670,9 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           <button
                             type="button"
                             onClick={() => setMobileViewTab('preview')}
-                            className="lg:hidden w-full py-2 rounded-lg bg-rose-500/15 border border-rose-500/30 hover:bg-rose-500/25 text-rose-400 font-bold text-xs flex items-center justify-center gap-1.5 transition-all mt-1"
+                            className="lg:hidden w-full py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 hover:bg-rose-500/25 text-rose-400 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all mt-0.5"
                           >
-                            <Smartphone size={14} />
+                            <Smartphone size={12} />
                             <span>Preview & Export Clip #{index + 1} 📱</span>
                           </button>
                         </div>
@@ -2019,14 +1761,14 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 <div
                   className={`relative ${
                     phonePreviewSize === 'compact'
-                      ? 'w-[260px] h-[462px]'
+                      ? 'w-[230px] h-[408px]'
                       : phonePreviewSize === 'standard'
-                      ? 'w-[310px] h-[551px]'
-                      : 'w-[340px] sm:w-[360px] md:w-[380px] h-[604px] sm:h-[640px] md:h-[675px]'
-                  } bg-black rounded-[40px] p-2.5 sm:p-3 shadow-2xl border-4 border-zinc-800 ring-1 ring-zinc-700/50 overflow-hidden flex flex-col items-center justify-center transition-all duration-200`}
+                      ? 'w-[270px] h-[480px]'
+                      : 'w-[300px] sm:w-[325px] h-[533px] sm:h-[578px]'
+                  } bg-black rounded-[36px] p-2 sm:p-2.5 shadow-2xl border-4 border-zinc-800 ring-1 ring-zinc-700/50 overflow-hidden flex flex-col items-center justify-center transition-all duration-200`}
                 >
                   {/* Camera notch */}
-                  <div className="absolute top-2 w-20 h-4 bg-zinc-900 rounded-full z-30" />
+                  <div className="absolute top-2 w-16 h-3 bg-zinc-900 rounded-full z-30" />
 
                   {/* Screen viewport */}
                   <div className="relative w-full h-full rounded-[26px] overflow-hidden bg-black flex items-center justify-center">
