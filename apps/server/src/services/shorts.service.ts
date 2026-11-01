@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
-import archiver from 'archiver';
+import * as archiverModule from 'archiver';
 import OpenAI from 'openai';
 
 export interface VideoInfo {
@@ -157,6 +157,12 @@ export const ShortsService = {
         '--dump-single-json',
         '--no-playlist',
         '--skip-download',
+        '--extractor-args',
+        'youtube:player_client=android,web',
+        '--retry-sleep',
+        'exp=1:10',
+        '--retries',
+        '3',
         url,
       ];
 
@@ -174,7 +180,10 @@ export const ShortsService = {
 
       proc.on('close', (code) => {
         if (code !== 0) {
-          return reject(new Error(`yt-dlp failed with code ${code}: ${stderr || 'Unknown error'}`));
+          if (stderr.includes('429') || stderr.includes('Too Many Requests')) {
+            return reject(new Error('YouTube rate-limited metadata lookup (HTTP 429). Please try again shortly or use the "Upload Video" tab.'));
+          }
+          return reject(new Error(`yt-dlp failed with code ${code}: ${stderr.substring(0, 250) || 'Unknown error'}`));
         }
 
         try {
@@ -240,7 +249,9 @@ export const ShortsService = {
   },
 
   /**
-   * Background processor: Downloads video + subtitles, analyzes for viral hooks
+   * Background processor: Downloads video + subtitles in a single unified pass,
+   * extracts metadata and subtitles without triggering YouTube 429 rate limits,
+   * and analyzes for viral hooks.
    */
   async processJob(
     jobId: string,
@@ -254,32 +265,23 @@ export const ShortsService = {
     const uploadsDir = getUploadsDir();
     const outputBase = path.join(uploadsDir, jobId);
 
-    // 1. Fetch info
+    // Initial placeholder video info while download streams
+    let videoInfo: VideoInfo = {
+      id: jobId,
+      title: 'YouTube Video',
+      duration: 180,
+      thumbnail: '',
+      channel: 'YouTube',
+      description: '',
+      webpage_url: url,
+    };
+    job.videoInfo = videoInfo;
+
+    // Unified single-pass download: gets video stream, info json, and subtitles in ONE connection
+    // This avoids rapid consecutive requests to YouTube that cause HTTP 429: Too Many Requests
     job.status = 'downloading';
-    job.stage = 'Extracting video metadata...';
-    job.progress = 10;
-
-    let videoInfo: VideoInfo;
-    try {
-      videoInfo = await this.getVideoInfo(url);
-      job.videoInfo = videoInfo;
-    } catch (err: any) {
-      console.warn('Could not pre-fetch info, proceeding with download:', err.message);
-      videoInfo = {
-        id: jobId,
-        title: 'YouTube Video',
-        duration: 180,
-        thumbnail: '',
-        channel: 'YouTube',
-        description: '',
-        webpage_url: url,
-      };
-      job.videoInfo = videoInfo;
-    }
-
-    // 2. Download video stream safely (isolated from subtitles so subtitle 429 NEVER breaks video download)
-    job.stage = 'Downloading YouTube video stream...';
-    job.progress = 25;
+    job.stage = 'Connecting to YouTube and streaming video...';
+    job.progress = 15;
 
     await new Promise<void>((resolve, reject) => {
       const outputTemplate = `${outputBase}.%(ext)s`;
@@ -290,6 +292,19 @@ export const ShortsService = {
         'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/best',
         '--no-playlist',
         '--no-abort-on-error',
+        '--write-info-json',
+        '--write-auto-sub',
+        '--write-sub',
+        '--sub-lang',
+        'en,hi',
+        '--convert-subs',
+        'vtt',
+        '--extractor-args',
+        'youtube:player_client=android,web',
+        '--retry-sleep',
+        'exp=1:10',
+        '--retries',
+        '3',
         '-o',
         outputTemplate,
         url,
@@ -304,8 +319,8 @@ export const ShortsService = {
         const pMatch = str.match(/(\d{1,3}\.\d)%/);
         if (pMatch) {
           const pct = parseFloat(pMatch[1]);
-          // Map 0-100% download progress to 25%-70% of total job progress
-          job.progress = Math.min(70, Math.round(25 + (pct * 0.45)));
+          // Map 0-100% download progress to 15%-70% of total job progress
+          job.progress = Math.min(70, Math.round(15 + (pct * 0.55)));
           job.stage = `Downloading video (${pct.toFixed(0)}%)...`;
         }
       });
@@ -315,22 +330,48 @@ export const ShortsService = {
       });
 
       dlProc.on('close', (code) => {
-        // Check if an output file was produced
+        // Check if an output video file was produced
         const potentialFiles = fs.readdirSync(uploadsDir).filter((f) => f.startsWith(jobId));
         const hasVideo = potentialFiles.some((f) => f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv'));
         if (hasVideo) {
           resolve();
         } else {
-          reject(new Error(`Video download failed: ${stderr.substring(0, 200)}`));
+          if (stderr.includes('429') || stderr.includes('Too Many Requests')) {
+            reject(new Error('YouTube rate-limited this request (HTTP 429). Please try again in a few moments, or use the "Upload Video" tab to process your file directly.'));
+          } else {
+            reject(new Error(`Video download failed: ${stderr.substring(0, 250) || 'Unknown error'}`));
+          }
         }
       });
 
       dlProc.on('error', (err) => reject(err));
     });
 
+    // Extract metadata from the generated .info.json if present
+    const updatedFiles = fs.readdirSync(uploadsDir);
+    const infoFile = updatedFiles.find((f) => f.startsWith(jobId) && f.endsWith('.info.json'));
+    if (infoFile) {
+      try {
+        const rawJson = fs.readFileSync(path.join(uploadsDir, infoFile), 'utf-8');
+        const parsed = JSON.parse(rawJson);
+        videoInfo = {
+          id: parsed.id || jobId,
+          title: parsed.title || 'Untitled YouTube Video',
+          duration: Math.round(parsed.duration || 0),
+          thumbnail: parsed.thumbnail || (parsed.thumbnails && parsed.thumbnails[0]?.url) || '',
+          channel: parsed.uploader || parsed.channel || 'Unknown Channel',
+          description: parsed.description ? parsed.description.substring(0, 300) : '',
+          webpage_url: parsed.webpage_url || url,
+          view_count: parsed.view_count || 0,
+        };
+        job.videoInfo = videoInfo;
+      } catch (err: any) {
+        console.warn('Could not parse downloaded .info.json:', err.message);
+      }
+    }
+
     // Locate downloaded video
-    const allFiles = fs.readdirSync(uploadsDir);
-    const videoFile = allFiles.find((f) => f.startsWith(jobId) && (f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv')));
+    const videoFile = updatedFiles.find((f) => f.startsWith(jobId) && (f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv')));
     if (!videoFile) {
       throw new Error('Downloaded video file could not be found.');
     }
@@ -342,44 +383,19 @@ export const ShortsService = {
     job.stage = 'Extracting transcript & analyzing high-engagement highlights...';
     job.status = 'analyzing';
 
-    // Step 2b: Try fetching subtitles non-fatally (isolated so HTTP 429 never crashes the job)
+    // Parse subtitles from the unified pass if present
     let transcriptSegments: Array<{ start: number; end: number; text: string }> = [];
-    try {
-      await new Promise<void>((subResolve) => {
-        const subProc = spawn(
-          getYtDlpBinary(),
-          [
-            '--js-runtimes',
-            'node',
-            '--write-auto-sub',
-            '--write-sub',
-            '--sub-lang',
-            'en,hi',
-            '--convert-subs',
-            'vtt',
-            '--skip-download',
-            '-o',
-            outputBase,
-            url,
-          ],
-          { windowsHide: true }
-        );
-
-        subProc.on('close', () => subResolve());
-        subProc.on('error', () => subResolve());
-      });
-
-      const updatedFiles = fs.readdirSync(uploadsDir);
-      const subtitleFile = updatedFiles.find((f) => f.startsWith(jobId) && f.endsWith('.vtt'));
-      if (subtitleFile) {
+    const subtitleFile = updatedFiles.find((f) => f.startsWith(jobId) && f.endsWith('.vtt'));
+    if (subtitleFile) {
+      try {
         transcriptSegments = parseVTTFile(path.join(uploadsDir, subtitleFile));
         console.log(`📝 [Shorts] Successfully parsed ${transcriptSegments.length} subtitle transcript segments.`);
+      } catch (subErr: any) {
+        console.warn('Subtitles parsing failed (non-fatal):', subErr.message);
       }
-    } catch (subErr: any) {
-      console.warn('Subtitles fetch skipped (non-fatal):', subErr.message);
     }
 
-    // 3. AI Highlight Detection
+    // AI Highlight Detection
     job.stage = 'AI analyzing moments for virality and high retention...';
     job.progress = 85;
 
@@ -905,10 +921,19 @@ ${transcriptText}`;
     // Package all rendered clips into a zip archive
     await new Promise<void>((resolve, reject) => {
       const output = fs.createWriteStream(zipPath);
-      const archive = archiver('zip', { zlib: { level: 4 } });
+      let archive: any;
+      if (typeof (archiverModule as any).ZipArchive === 'function') {
+        archive = new (archiverModule as any).ZipArchive({ zlib: { level: 4 } });
+      } else if (typeof (archiverModule as any).default === 'function') {
+        archive = (archiverModule as any).default('zip', { zlib: { level: 4 } });
+      } else if (typeof (archiverModule as any) === 'function') {
+        archive = (archiverModule as any)('zip', { zlib: { level: 4 } });
+      } else {
+        return reject(new Error('Zip archiver module is not available'));
+      }
 
       output.on('close', () => resolve());
-      archive.on('error', (err) => reject(err));
+      archive.on('error', (err: any) => reject(err));
 
       archive.pipe(output);
 

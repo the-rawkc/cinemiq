@@ -194,10 +194,11 @@ export const ShortsController = {
       ShortsService.setJob(jobId, job);
 
       // Probe duration if possible and generate clips
+      const requestedClips = Math.max(1, Math.min(parseInt(req.body.clipCount, 10) || 4, 25));
       const clips = ShortsService.generateAlgorithmicClips(
         job.videoInfo,
         [],
-        4,
+        requestedClips,
         15,
         50
       );
