@@ -273,23 +273,38 @@ export const ShortsService = {
     const uploadsDir = getUploadsDir();
     const outputBase = path.join(uploadsDir, jobId);
 
-    // Initial placeholder video info while download streams
-    let videoInfo: VideoInfo = {
-      id: jobId,
-      title: 'YouTube Video',
-      duration: 180,
-      thumbnail: '',
-      channel: 'YouTube',
-      description: '',
-      webpage_url: url,
-    };
-    job.videoInfo = videoInfo;
+    // 1. Fetch metadata immediately (fast ~1-2 seconds)
+    let videoInfo: VideoInfo;
+    try {
+      videoInfo = await this.getVideoInfo(url);
+      job.videoInfo = videoInfo;
+    } catch (err: any) {
+      console.warn('Metadata lookup fallback:', err.message);
+      videoInfo = {
+        id: jobId,
+        title: 'YouTube Video',
+        duration: 180,
+        thumbnail: '',
+        channel: 'YouTube',
+        description: '',
+        webpage_url: url,
+      };
+      job.videoInfo = videoInfo;
+    }
 
-    // Unified single-pass download: gets video stream, info json, and subtitles in ONE connection
-    // This avoids rapid consecutive requests to YouTube that cause HTTP 429: Too Many Requests
+    // 2. Generate AI clips immediately so user sees viral highlights in 2 seconds!
+    const earlyClips = await this.detectViralMoments(
+      videoInfo,
+      [],
+      clipCount,
+      targetDuration
+    );
+    job.clips = earlyClips;
+
+    // 3. Fast progressive stream download without slow secondary audio-merge pass
     job.status = 'downloading';
-    job.stage = 'Connecting to YouTube and streaming video...';
-    job.progress = 15;
+    job.stage = 'Highlights identified! Streaming video for instant preview...';
+    job.progress = 25;
 
     await new Promise<void>((resolve, reject) => {
       const outputTemplate = `${outputBase}.%(ext)s`;
@@ -298,18 +313,9 @@ export const ShortsService = {
         'node',
         '--newline',
         '-f',
-        'bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo[height<=480]+bestaudio/best',
-        '--merge-output-format',
-        'mp4',
-        '-N',
-        '6', // 6 parallel connection streams for ultrafast download
-        '--buffer-size',
-        '16M',
-        '--http-chunk-size',
-        '10M',
+        'best[height<=720][ext=mp4]/best[height<=480][ext=mp4]/18/bestvideo[height<=720]+bestaudio/best',
         '--no-playlist',
         '--no-abort-on-error',
-        '--write-info-json',
         '--extractor-args',
         'youtube:player_client=android,web',
         '--retry-sleep',

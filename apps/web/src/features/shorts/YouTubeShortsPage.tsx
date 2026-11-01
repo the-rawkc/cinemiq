@@ -1087,7 +1087,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         </section>
 
         {/* 3. Results Section: Detected Clips & Interactive Preview Player */}
-        {job?.status === 'done' && clips.length > 0 && (
+        {job && clips.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 md:gap-6 items-start">
             {/* Mobile View Toggle Tabs (Clips List vs 9:16 Phone Preview) */}
             <div className="flex lg:hidden items-center p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 w-full col-span-1">
@@ -1675,8 +1675,21 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         </div>
                       </>
                     ) : (
-                      <div className="text-zinc-600 text-xs text-center p-4">
-                        Video source unavailable
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-zinc-950 text-center gap-2.5">
+                        <RefreshCw size={24} className="animate-spin text-rose-400" />
+                        <span className="text-xs font-bold text-zinc-100">
+                          {job?.stage || 'Connecting video stream...'}
+                        </span>
+                        <span className="text-[10px] text-zinc-400">
+                          {job?.downloadProgress?.percent ? `${Math.round(job.downloadProgress.percent)}%` : `${job?.progress || 30}%`}
+                          {job?.downloadProgress?.speed ? ` • ${job.downloadProgress.speed}` : ''}
+                        </span>
+                        <div className="w-36 h-1.5 rounded-full bg-zinc-800 overflow-hidden mt-1">
+                          <div
+                            className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full"
+                            style={{ width: `${Math.max(10, job?.downloadProgress?.percent || job?.progress || 30)}%` }}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
