@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import ffmpeg from 'fluent-ffmpeg';
 import * as archiverModule from 'archiver';
 import OpenAI from 'openai';
@@ -914,13 +915,12 @@ ${transcriptText}`;
 
     const duration = Math.max(1, endTime - startTime);
     const uploadsDir = getUploadsDir();
-    const outputFilename = `short-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.mp4`;
-    const outputPath = path.join(uploadsDir, outputFilename);
 
     const is1080p = params.targetResolution === '1080p';
     const targetW = is1080p ? 1080 : 720;
     const targetH = is1080p ? 1920 : 1280;
-    const bgScale = is1080p ? '180:320' : '120:213';
+    // Ambient blur downscale surface: 90x160 (1080p) or 64x114 (720p) for 100x faster processing
+    const bgScale = is1080p ? '90:160' : '64:114';
     const fontSize = is1080p ? 48 : 34;
     const textY = is1080p ? 240 : 160;
 
@@ -941,20 +941,40 @@ ${transcriptText}`;
       .replace(/\]/g, '\\]')
       .trim();
 
-    // Check fast render cache
+    // Check fast render cache in memory
     const cacheKey = `${sourceVideoPath}_${startTime}_${endTime}_${aspectRatio}_${cleanHeadline}_${params.targetResolution || '720p'}`;
     const cached = renderCache.get(cacheKey);
     if (cached && fs.existsSync(cached.filePath)) {
       return cached;
     }
 
+    // Check persistent disk cache by deterministic hash
+    const keyHash = crypto.createHash('md5').update(cacheKey).digest('hex').substring(0, 12);
+    const outputFilename = `short-${params.targetResolution || '720p'}-${keyHash}.mp4`;
+    const outputPath = path.join(uploadsDir, outputFilename);
+
+    if (fs.existsSync(outputPath)) {
+      try {
+        const stat = fs.statSync(outputPath);
+        if (stat.size > 10000) {
+          const diskCached = {
+            url: `/uploads/shorts/${outputFilename}`,
+            duration,
+            filePath: outputPath,
+          };
+          renderCache.set(cacheKey, diskCached);
+          return diskCached;
+        }
+      } catch {}
+    }
+
     if (aspectRatio === '9:16-blur') {
-      // 9:16 vertical blurred background + sharp centered foreground
+      // 9:16 vertical fast-bilinear blurred background + crisp centered foreground
       filterComplex =
         '[0:v]split=2[in1][in2];' +
-        `[in1]scale=${bgScale}:force_original_aspect_ratio=increase,crop=${bgScale},boxblur=5:5,scale=${targetW}:${targetH}[bg];` +
-        `[in2]scale=${targetW}:-2[fg];` +
-        '[bg][fg]overlay=(W-w)/2:(H-h)/2[base]';
+        `[in1]scale=${bgScale}:flags=fast_bilinear:force_original_aspect_ratio=increase,crop=${bgScale},boxblur=3:1,scale=${targetW}:${targetH}:flags=fast_bilinear[bg];` +
+        `[in2]scale=${targetW}:-2:flags=fast_bilinear[fg];` +
+        '[bg][fg]overlay=(W-w)/2:(H-h)/2:eval=init[base]';
       
       if (cleanHeadline) {
         filterComplex += `;[base]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v]`;
@@ -963,7 +983,7 @@ ${transcriptText}`;
       }
     } else if (aspectRatio === '9:16-crop') {
       // Center crop filling 9:16
-      filterComplex = `[0:v]crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=${targetW}:${targetH}[base]`;
+      filterComplex = `[0:v]crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=${targetW}:${targetH}:flags=fast_bilinear[base]`;
       if (cleanHeadline) {
         filterComplex += `;[base]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v]`;
       } else {
@@ -971,7 +991,7 @@ ${transcriptText}`;
       }
     } else if (aspectRatio === '16:9-fit') {
       // 9:16 Canvas with black bars
-      filterComplex = `[0:v]scale=${targetW}:-2,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:black[base]`;
+      filterComplex = `[0:v]scale=${targetW}:-2:flags=fast_bilinear,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:black[base]`;
       if (cleanHeadline) {
         filterComplex += `;[base]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v]`;
       } else {
@@ -997,6 +1017,7 @@ ${transcriptText}`;
           '-preset ultrafast',
           '-crf 23',
           '-tune fastdecode',
+          '-x264-params no-scenecut=1:ref=1:me=dia:subme=0:b-adapt=0',
           '-threads 0',
           '-c:a aac',
           '-b:a 128k',
@@ -1062,9 +1083,9 @@ ${transcriptText}`;
       }
     }
 
-    // Render clips in chunks of 3 for ultra-fast throughput without CPU exhaustion
+    // Render clips in chunks of 4 for ultra-fast throughput
     const renderedFiles: Array<{ title: string; filePath: string }> = [];
-    const chunkSize = 3;
+    const chunkSize = 4;
 
     for (let i = 0; i < clips.length; i += chunkSize) {
       const chunk = clips.slice(i, i + chunkSize);
@@ -1094,7 +1115,7 @@ ${transcriptText}`;
       renderedFiles.push(...results);
     }
 
-    // Package all rendered clips into a zip archive
+    // Package all rendered clips into a zip archive with full title names
     await new Promise<void>((resolve, reject) => {
       const output = fs.createWriteStream(zipPath);
       let archive: any;
@@ -1113,13 +1134,31 @@ ${transcriptText}`;
 
       archive.pipe(output);
 
+      const videoTitle = (job.videoInfo?.title || '')
+        .replace(/[\\/:*?"<>|#]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
       for (let idx = 0; idx < renderedFiles.length; idx++) {
         const item = renderedFiles[idx];
-        const cleanTitle = item.title
-          .replace(/[^a-zA-Z0-9_\- ]/g, '')
-          .trim()
-          .substring(0, 45) || `clip-${idx + 1}`;
-        const entryName = `${String(idx + 1).padStart(2, '0')} - ${cleanTitle}.mp4`;
+        const cleanClip = (item.title || `Clip ${idx + 1}`)
+          .replace(/[\\/:*?"<>|#]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        let fullTitle = '';
+        if (videoTitle && cleanClip) {
+          if (cleanClip.toLowerCase().includes(videoTitle.toLowerCase())) {
+            fullTitle = cleanClip;
+          } else {
+            fullTitle = `${videoTitle} - ${cleanClip}`;
+          }
+        } else {
+          fullTitle = cleanClip || videoTitle || `Clip ${idx + 1}`;
+        }
+
+        if (fullTitle.length > 120) fullTitle = fullTitle.substring(0, 120).trim();
+        const entryName = `${String(idx + 1).padStart(2, '0')} - ${fullTitle}.mp4`;
         archive.file(item.filePath, { name: entryName });
       }
 
@@ -1170,7 +1209,12 @@ ${transcriptText}`;
 
     // Render clips in parallel chunks
     const exportedClips: Array<{ title: string; filename: string; url: string; duration: number }> = [];
-    const chunkSize = 3;
+    const chunkSize = 4;
+
+    const videoTitle = (job.videoInfo?.title || '')
+      .replace(/[\\/:*?"<>|#]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
 
     for (let i = 0; i < clips.length; i += chunkSize) {
       const chunk = clips.slice(i, i + chunkSize);
@@ -1191,18 +1235,31 @@ ${transcriptText}`;
             targetResolution: params.targetResolution,
           });
 
-          const cleanTitle = (clip.title || `Short-${clipIndex + 1}`)
-            .replace(/[^a-zA-Z0-9_\- ]/g, '')
-            .trim()
-            .substring(0, 45) || `clip-${clipIndex + 1}`;
-          const cleanFilename = `${String(clipIndex + 1).padStart(2, '0')} - ${cleanTitle}.mp4`;
+          const cleanClip = (clip.title || `Clip ${clipIndex + 1}`)
+            .replace(/[\\/:*?"<>|#]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          let fullTitle = '';
+          if (videoTitle && cleanClip) {
+            if (cleanClip.toLowerCase().includes(videoTitle.toLowerCase())) {
+              fullTitle = cleanClip;
+            } else {
+              fullTitle = `${videoTitle} - ${cleanClip}`;
+            }
+          } else {
+            fullTitle = cleanClip || videoTitle || `Clip ${clipIndex + 1}`;
+          }
+
+          if (fullTitle.length > 120) fullTitle = fullTitle.substring(0, 120).trim();
+          const cleanFilename = `${String(clipIndex + 1).padStart(2, '0')} - ${fullTitle}.mp4`;
           const destinationPath = path.join(folderPath, cleanFilename);
 
           // Copy rendered short into dedicated folder
           fs.copyFileSync(res.filePath, destinationPath);
 
           return {
-            title: clip.title || `Short #${clipIndex + 1}`,
+            title: fullTitle,
             filename: cleanFilename,
             url: `/uploads/shorts/${folderName}/${encodeURIComponent(cleanFilename)}`,
             duration: res.duration,

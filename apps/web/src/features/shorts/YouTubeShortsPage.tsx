@@ -106,6 +106,40 @@ const DEMO_PRESETS = [
   },
 ];
 
+// Helper to construct complete, full title names for downloads without truncation
+const getFullShortFilename = (
+  videoTitle?: string,
+  clipTitle?: string,
+  index?: number
+): string => {
+  const cleanStr = (s?: string) =>
+    (s || '')
+      .replace(/[\\/:*?"<>|#]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const vTitle = cleanStr(videoTitle);
+  const cTitle = cleanStr(clipTitle);
+
+  let full = '';
+  if (vTitle && cTitle) {
+    if (cTitle.toLowerCase().includes(vTitle.toLowerCase())) {
+      full = cTitle;
+    } else {
+      full = `${vTitle} - ${cTitle}`;
+    }
+  } else {
+    full = cTitle || vTitle || `Cinemiq-Short-${(index ?? 0) + 1}`;
+  }
+
+  if (typeof index === 'number') {
+    full = `${String(index + 1).padStart(2, '0')} - ${full}`;
+  }
+
+  if (full.length > 120) full = full.substring(0, 120).trim();
+  return `${full}.mp4`;
+};
+
 export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   onClose,
   onLoadProject,
@@ -136,11 +170,15 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   // Rendering State
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgressMsg, setRenderProgressMsg] = useState('');
+  const [renderDisplayPercent, setRenderDisplayPercent] = useState(0);
+  const [renderTargetPercent, setRenderTargetPercent] = useState(0);
   const [renderedDownloadUrl, setRenderedDownloadUrl] = useState<string | null>(null);
 
   // Batch Export All State (Single click download all)
   const [isBatchRendering, setIsBatchRendering] = useState(false);
   const [batchProgressMsg, setBatchProgressMsg] = useState('');
+  const [batchDisplayPercent, setBatchDisplayPercent] = useState(0);
+  const [batchTargetPercent, setBatchTargetPercent] = useState(0);
   const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
   const [renderingClipId, setRenderingClipId] = useState<string | null>(null);
 
@@ -148,7 +186,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [targetResolution, setTargetResolution] = useState<'720p' | '1080p'>('720p');
   const [isFolderExporting, setIsFolderExporting] = useState(false);
   const [folderProgressMsg, setFolderProgressMsg] = useState('');
-  const [folderSavePercent, setFolderSavePercent] = useState<number>(0);
+  const [folderDisplayPercent, setFolderDisplayPercent] = useState(0);
+  const [folderTargetPercent, setFolderTargetPercent] = useState(0);
   const [exportedFolderPath, setExportedFolderPath] = useState<string | null>(null);
   const [exportedClips, setExportedClips] = useState<Array<{ title: string; filename: string; url: string; duration: number }>>([]);
 
@@ -251,6 +290,69 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
     return () => clearInterval(timer);
   }, [isAnalyzing, targetProgress, job?.status]);
+
+  // Smoothly interpolate renderDisplayPercent (for single short render)
+  useEffect(() => {
+    if (!isRendering) {
+      if (renderedDownloadUrl) setRenderDisplayPercent(100);
+      return;
+    }
+    const timer = setInterval(() => {
+      setRenderDisplayPercent((prev) => {
+        if (renderTargetPercent > prev) {
+          const delta = renderTargetPercent - prev;
+          const step = Math.max(0.3, delta * 0.16);
+          return Number(Math.min(renderTargetPercent, prev + step).toFixed(1));
+        } else if (prev < 92 && renderTargetPercent <= prev) {
+          return Number((prev + 0.05).toFixed(1));
+        }
+        return prev;
+      });
+    }, 25);
+    return () => clearInterval(timer);
+  }, [isRendering, renderTargetPercent, renderedDownloadUrl]);
+
+  // Smoothly interpolate batchDisplayPercent (for all-shorts ZIP)
+  useEffect(() => {
+    if (!isBatchRendering) {
+      if (batchDownloadUrl) setBatchDisplayPercent(100);
+      return;
+    }
+    const timer = setInterval(() => {
+      setBatchDisplayPercent((prev) => {
+        if (batchTargetPercent > prev) {
+          const delta = batchTargetPercent - prev;
+          const step = Math.max(0.3, delta * 0.14);
+          return Number(Math.min(batchTargetPercent, prev + step).toFixed(1));
+        } else if (prev < 92 && batchTargetPercent <= prev) {
+          return Number((prev + 0.04).toFixed(1));
+        }
+        return prev;
+      });
+    }, 25);
+    return () => clearInterval(timer);
+  }, [isBatchRendering, batchTargetPercent, batchDownloadUrl]);
+
+  // Smoothly interpolate folderDisplayPercent (for Folder Export)
+  useEffect(() => {
+    if (!isFolderExporting) {
+      if (exportedClips.length > 0) setFolderDisplayPercent(100);
+      return;
+    }
+    const timer = setInterval(() => {
+      setFolderDisplayPercent((prev) => {
+        if (folderTargetPercent > prev) {
+          const delta = folderTargetPercent - prev;
+          const step = Math.max(0.3, delta * 0.16);
+          return Number(Math.min(folderTargetPercent, prev + step).toFixed(1));
+        } else if (prev < 94 && folderTargetPercent <= prev) {
+          return Number((prev + 0.05).toFixed(1));
+        }
+        return prev;
+      });
+    }, 25);
+    return () => clearInterval(timer);
+  }, [isFolderExporting, folderTargetPercent, exportedClips.length]);
 
   // Poll Job Status if active
   useEffect(() => {
@@ -500,7 +602,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     setTimeout(() => setCopiedTagText(null), 2000);
   };
 
-  // Download Single Clip directly from list card in 1 click
+  // Download Single Clip directly from list card in 1 click with full title name
   const handleDownloadSingleClip = async (clip: ViralClip) => {
     if (!job?.videoUrl) return;
 
@@ -542,8 +644,13 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       const fullUrl = `${API_URL}${data.clipUrl}`;
       setRenderedDownloadUrl(fullUrl);
       setSelectedClipId(clip.id);
-      const safeTitle = (clip.title || 'short').replace(/[^a-zA-Z0-9_\-]/g, '_');
-      triggerBrowserDownload(fullUrl, `${safeTitle}.mp4`);
+      const clipIndex = clips.findIndex((c) => c.id === clip.id);
+      const fullFilename = getFullShortFilename(
+        job.videoInfo?.title,
+        clip.title,
+        clipIndex >= 0 ? clipIndex : undefined
+      );
+      triggerBrowserDownload(fullUrl, fullFilename);
     } catch (err: any) {
       console.error('Single download error:', err);
       setErrorMessage(err.message || 'Failed to download clip.');
@@ -552,14 +659,20 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     }
   };
 
-  // Single Click to Download ALL Clips at once in a ZIP bundle
+  // Single Click to Download ALL Clips at once in a ZIP bundle with full title names
   const handleDownloadAllZip = async () => {
     if (!job?.id || clips.length === 0) return;
 
     setIsBatchRendering(true);
-    setBatchProgressMsg(`Fast rendering and packaging all ${clips.length} clips into ZIP...`);
+    setBatchDisplayPercent(0);
+    setBatchTargetPercent(20);
+    setBatchProgressMsg(`Fast rendering all ${clips.length} shorts in ${targetResolution.toUpperCase()}...`);
     setBatchDownloadUrl(null);
     setErrorMessage(null);
+
+    const zipProgressTimer = setInterval(() => {
+      setBatchTargetPercent((prev) => Math.min(88, prev + 8));
+    }, 300);
 
     try {
       const res = await fetch(`${API_URL}/api/shorts/download-all-zip`, {
@@ -591,25 +704,44 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         throw new Error(data.error || 'Failed to generate ZIP bundle');
       }
 
+      clearInterval(zipProgressTimer);
+      setBatchTargetPercent(100);
+      setBatchProgressMsg(`Complete! All ${data.totalClips} shorts packaged in ZIP.`);
+
       const fullZipUrl = `${API_URL}${data.zipUrl}`;
       setBatchDownloadUrl(fullZipUrl);
-      setBatchProgressMsg(`Complete! All ${data.totalClips} shorts packaged in ZIP.`);
-      triggerBrowserDownload(fullZipUrl, data.zipFilename || `cinemiq-shorts-${job.id}.zip`);
+      const cleanVideo = (job.videoInfo?.title || 'cinemiq')
+        .replace(/[\\/:*?"<>|#]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .substring(0, 50);
+      const zipName = `${cleanVideo}-all-shorts.zip`;
+      triggerBrowserDownload(fullZipUrl, data.zipFilename || zipName);
+
+      setTimeout(() => {
+        setIsBatchRendering(false);
+      }, 600);
     } catch (err: any) {
+      clearInterval(zipProgressTimer);
       console.error('Batch export error:', err);
-      setErrorMessage(err.message || 'Failed to download all clips at once.');
-    } finally {
       setIsBatchRendering(false);
+      setErrorMessage(err.message || 'Failed to download all clips at once.');
     }
   };
 
-  // Render & Download the Short via FFmpeg
+  // Render & Download the Short via FFmpeg with smooth progress and full title name
   const handleRenderShort = async () => {
     if (!activeClip || !job?.videoUrl) return;
 
     setIsRendering(true);
-    setRenderProgressMsg('FFmpeg is rendering vertical 9:16 short with headline...');
+    setRenderDisplayPercent(0);
+    setRenderTargetPercent(25);
+    setRenderProgressMsg(`Rendering ${targetResolution.toUpperCase()} short with headline...`);
     setRenderedDownloadUrl(null);
+
+    const renderTimer = setInterval(() => {
+      setRenderTargetPercent((prev) => Math.min(88, prev + 12));
+    }, 280);
 
     try {
       const res = await fetch(`${API_URL}/api/shorts/render-clip`, {
@@ -642,26 +774,44 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         throw new Error(data.error || 'Rendering clip failed');
       }
 
+      clearInterval(renderTimer);
+      setRenderTargetPercent(100);
+      setRenderProgressMsg('Rendering complete! Downloading...');
+
       const fullUrl = `${API_URL}${data.clipUrl}`;
       setRenderedDownloadUrl(fullUrl);
-      const safeTitle = (activeClip.title || 'short').replace(/[^a-zA-Z0-9_\-]/g, '_');
-      triggerBrowserDownload(fullUrl, `${safeTitle}.mp4`);
+      const clipIndex = clips.findIndex((c) => c.id === activeClip.id);
+      const fullFilename = getFullShortFilename(
+        job.videoInfo?.title,
+        activeClip.title,
+        clipIndex >= 0 ? clipIndex : undefined
+      );
+      triggerBrowserDownload(fullUrl, fullFilename);
+
+      setTimeout(() => {
+        setIsRendering(false);
+      }, 500);
     } catch (err: any) {
+      clearInterval(renderTimer);
       console.error('Render error:', err);
-      setErrorMessage(err.message || 'Failed to render short.');
-    } finally {
       setIsRendering(false);
+      setErrorMessage(err.message || 'Failed to render short.');
     }
   };
 
-  // 1-Click Save Directly to a Folder on User's Computer (Zero ZIP)
+  // 1-Click Save Directly to a Folder on User's Computer with smooth progressive tracking
   const handleSaveDirectlyToFolder = async () => {
     if (!job?.id || clips.length === 0) return;
 
     setIsFolderExporting(true);
-    setFolderSavePercent(5);
-    setFolderProgressMsg('Preparing folder export and rendering clips...');
+    setFolderDisplayPercent(0);
+    setFolderTargetPercent(15);
+    setFolderProgressMsg(`Preparing folder export in ${targetResolution.toUpperCase()} mode...`);
     setErrorMessage(null);
+
+    const folderRenderTimer = setInterval(() => {
+      setFolderTargetPercent((prev) => Math.min(45, prev + 5));
+    }, 300);
 
     try {
       // Check if browser supports showDirectoryPicker (Chrome, Edge, Brave, Opera)
@@ -675,6 +825,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           });
         } catch (pickErr: any) {
           if (pickErr.name === 'AbortError') {
+            clearInterval(folderRenderTimer);
             setIsFolderExporting(false);
             return; // user cancelled picker
           }
@@ -682,8 +833,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         }
       }
 
-      setFolderSavePercent(20);
-      setFolderProgressMsg('Rendering all shorts in ultrafast mode...');
+      setFolderProgressMsg(`Fast rendering ${clips.length} shorts in ${targetResolution.toUpperCase()}...`);
       const res = await fetch(`${API_URL}/api/shorts/export-folder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -711,17 +861,18 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         throw new Error(data.error || 'Failed to export folder');
       }
 
+      clearInterval(folderRenderTimer);
       setExportedFolderPath(data.folderPath);
       setExportedClips(data.clips);
-      setFolderSavePercent(40);
+      setFolderTargetPercent(50);
 
       if (dirHandle) {
         // Stream each MP4 file directly into the user's picked directory
         for (let i = 0; i < data.clips.length; i++) {
           const item = data.clips[i];
-          const currentPct = Math.round(40 + (((i + 1) / data.clips.length) * 58));
-          setFolderSavePercent(currentPct);
-          setFolderProgressMsg(`Saving "${item.filename}" (${i + 1}/${data.clips.length}) directly into folder...`);
+          const targetPct = Math.round(50 + (((i + 1) / data.clips.length) * 48));
+          setFolderTargetPercent(targetPct);
+          setFolderProgressMsg(`Saving "${item.filename}" (${i + 1}/${data.clips.length}) into folder...`);
           const fileRes = await fetch(`${API_URL}${item.url}`);
           const fileBlob = await fileRes.blob();
           const fileHandle = await dirHandle.getFileHandle(item.filename, { create: true });
@@ -729,26 +880,30 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           await writable.write(fileBlob);
           await writable.close();
         }
-        setFolderSavePercent(100);
+        setFolderTargetPercent(100);
         setFolderProgressMsg(`✅ All ${data.clips.length} shorts saved directly into your folder!`);
       } else {
         // Fallback for browsers without File System Access API: trigger direct loose file downloads
         for (let i = 0; i < data.clips.length; i++) {
           const item = data.clips[i];
-          const currentPct = Math.round(40 + (((i + 1) / data.clips.length) * 58));
-          setFolderSavePercent(currentPct);
-          setFolderProgressMsg(`Downloading "${item.filename}" (${i + 1}/${data.clips.length}) loose to downloads...`);
+          const targetPct = Math.round(50 + (((i + 1) / data.clips.length) * 48));
+          setFolderTargetPercent(targetPct);
+          setFolderProgressMsg(`Downloading "${item.filename}" (${i + 1}/${data.clips.length}) to downloads...`);
           triggerBrowserDownload(`${API_URL}${item.url}`, item.filename);
           await new Promise((r) => setTimeout(r, 350));
         }
-        setFolderSavePercent(100);
+        setFolderTargetPercent(100);
         setFolderProgressMsg(`✅ All ${data.clips.length} loose shorts downloaded directly!`);
       }
+
+      setTimeout(() => {
+        setIsFolderExporting(false);
+      }, 700);
     } catch (err: any) {
+      clearInterval(folderRenderTimer);
       console.error('Folder export error:', err);
-      setErrorMessage(err.message || 'Failed to save to folder.');
-    } finally {
       setIsFolderExporting(false);
+      setErrorMessage(err.message || 'Failed to save to folder.');
     }
   };
 
@@ -1469,12 +1624,31 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       <RefreshCw size={13} className="animate-spin text-blue-400" />
                       <span>{folderProgressMsg || 'Exporting shorts directly to folder...'}</span>
                     </div>
-                    <span className="font-mono text-blue-400 text-xs font-black">{folderSavePercent}%</span>
+                    <span className="font-mono text-blue-400 text-xs font-black">{Math.round(folderDisplayPercent)}%</span>
                   </div>
-                  <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
+                  <div className="w-full h-2 rounded-full bg-zinc-900 overflow-hidden p-[1px]">
                     <div
-                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-400 transition-all duration-300 rounded-full"
-                      style={{ width: `${Math.max(5, folderSavePercent)}%` }}
+                      className="h-full bg-gradient-to-r from-blue-500 via-indigo-400 to-emerald-400 transition-all duration-150 ease-out rounded-full"
+                      style={{ width: `${Math.min(100, Math.max(2, folderDisplayPercent))}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Batch ZIP Active Progress Alert */}
+              {isBatchRendering && (
+                <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 flex flex-col gap-2 text-xs animate-in fade-in">
+                  <div className="flex items-center justify-between font-bold">
+                    <div className="flex items-center gap-2 text-emerald-300 text-[11px]">
+                      <RefreshCw size={13} className="animate-spin text-emerald-400" />
+                      <span>{batchProgressMsg || 'Packaging all shorts into ZIP...'}</span>
+                    </div>
+                    <span className="font-mono text-emerald-400 text-xs font-black">{Math.round(batchDisplayPercent)}%</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-zinc-900 overflow-hidden p-[1px]">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 transition-all duration-150 ease-out rounded-full"
+                      style={{ width: `${Math.min(100, Math.max(2, batchDisplayPercent))}%` }}
                     />
                   </div>
                 </div>
@@ -2085,6 +2259,25 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     )}
                   </button>
 
+                  {/* Single Render Smooth Progress Track */}
+                  {isRendering && (
+                    <div className="w-full p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/30 flex flex-col gap-1.5 animate-in fade-in">
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span className="text-rose-300 flex items-center gap-1.5">
+                          <RefreshCw size={12} className="animate-spin text-rose-400" />
+                          <span>{renderProgressMsg || 'Rendering short...'}</span>
+                        </span>
+                        <span className="font-mono text-rose-400 font-black">{Math.round(renderDisplayPercent)}%</span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-rose-500 to-amber-400 transition-all duration-150 ease-out rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(2, renderDisplayPercent))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   {/* 1-Click Download ALL Clips in a ZIP bundle */}
                   <button
                     type="button"
@@ -2094,7 +2287,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                   >
                     {isBatchRendering ? (
                       <>
-                        <RefreshCw size={14} className="animate-spin" />
+                        <RefreshCw size={14} className="animate-spin text-emerald-400" />
                         <span>{batchProgressMsg || 'Packaging all clips into ZIP...'}</span>
                       </>
                     ) : (
@@ -2104,6 +2297,25 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       </>
                     )}
                   </button>
+
+                  {/* Batch ZIP Smooth Progress Track */}
+                  {isBatchRendering && (
+                    <div className="w-full p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 flex flex-col gap-1.5 animate-in fade-in">
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span className="text-emerald-300 flex items-center gap-1.5">
+                          <RefreshCw size={12} className="animate-spin text-emerald-400" />
+                          <span>{batchProgressMsg || 'Packaging ZIP...'}</span>
+                        </span>
+                        <span className="font-mono text-emerald-400 font-black">{Math.round(batchDisplayPercent)}%</span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-150 ease-out rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(2, batchDisplayPercent))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {exportedFolderPath && (
                     <button
@@ -2135,7 +2347,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     </div>
                     <a
                       href={batchDownloadUrl}
-                      download={`cinemiq-shorts-${job.id}.zip`}
+                      download={`${(job?.videoInfo?.title || 'cinemiq').replace(/[\\/:*?"<>|#]/g, ' ').trim()}-shorts.zip`}
                       target="_blank"
                       rel="noreferrer"
                       className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
@@ -2154,7 +2366,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     </div>
                     <a
                       href={renderedDownloadUrl}
-                      download="cinemiq-short.mp4"
+                      download={getFullShortFilename(job?.videoInfo?.title, activeClip?.title)}
                       target="_blank"
                       rel="noreferrer"
                       className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
