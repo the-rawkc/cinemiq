@@ -15,7 +15,15 @@ import {
   Copy,
   Check,
   Tv,
-  Smartphone
+  Smartphone,
+  Volume2,
+  VolumeX,
+  Repeat,
+  FastForward,
+  Rewind,
+  Archive,
+  Zap,
+  Maximize2
 } from 'lucide-react';
 import { API_URL } from '../../config';
 
@@ -108,10 +116,20 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [renderProgressMsg, setRenderProgressMsg] = useState('');
   const [renderedDownloadUrl, setRenderedDownloadUrl] = useState<string | null>(null);
 
-  // Video Preview State
+  // Batch Export All State (Single click download all)
+  const [isBatchRendering, setIsBatchRendering] = useState(false);
+  const [batchProgressMsg, setBatchProgressMsg] = useState('');
+  const [batchDownloadUrl, setBatchDownloadUrl] = useState<string | null>(null);
+  const [renderingClipId, setRenderingClipId] = useState<string | null>(null);
+
+  // Video Preview & Player Controls State
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentPlayTime, setCurrentPlayTime] = useState(0);
+  const [volume, setVolume] = useState<number>(1);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const [isLooping, setIsLooping] = useState<boolean>(true);
 
   // Active clip helper
   const clips = job?.clips || [];
@@ -128,6 +146,9 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     ? customHeadlines[activeClip.id] ?? activeClip.suggestedHeadline
     : '';
 
+  const clipDuration = Math.max(0.1, currentEnd - currentStart);
+  const currentProgressSec = Math.max(0, Math.min(clipDuration, currentPlayTime - currentStart));
+
   // Select first clip when clips arrive
   useEffect(() => {
     if (clips.length > 0 && !selectedClipId) {
@@ -142,19 +163,36 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
     v.currentTime = currentStart;
     setCurrentPlayTime(currentStart);
+    v.volume = isMuted ? 0 : volume;
+    v.playbackRate = playbackSpeed;
 
     const handleTimeUpdate = () => {
       setCurrentPlayTime(v.currentTime);
       if (v.currentTime >= currentEnd) {
-        v.currentTime = currentStart; // loop clip
+        if (isLooping) {
+          v.currentTime = currentStart;
+          v.play().catch(() => {});
+        } else {
+          v.pause();
+          setIsPlaying(false);
+          v.currentTime = currentStart;
+        }
       }
     };
 
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+
     v.addEventListener('timeupdate', handleTimeUpdate);
+    v.addEventListener('play', handlePlay);
+    v.addEventListener('pause', handlePause);
+
     return () => {
       v.removeEventListener('timeupdate', handleTimeUpdate);
+      v.removeEventListener('play', handlePlay);
+      v.removeEventListener('pause', handlePause);
     };
-  }, [selectedClipId, currentStart, currentEnd]);
+  }, [selectedClipId, currentStart, currentEnd, isLooping]);
 
   // Poll Job Status if active
   useEffect(() => {
@@ -308,6 +346,167 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     }
   };
 
+  // Helper to trigger fast direct file download in browser
+  const triggerBrowserDownload = (url: string, filename?: string) => {
+    const a = document.createElement('a');
+    a.href = url;
+    if (filename) a.download = filename;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // Video Playing Control Handlers
+  const handleSeek = (newSec: number) => {
+    if (!videoRef.current) return;
+    const target = currentStart + Math.max(0, Math.min(clipDuration, newSec));
+    videoRef.current.currentTime = target;
+    setCurrentPlayTime(target);
+  };
+
+  const handleSkip = (seconds: number) => {
+    if (!videoRef.current) return;
+    const target = Math.max(currentStart, Math.min(currentEnd, videoRef.current.currentTime + seconds));
+    videoRef.current.currentTime = target;
+    setCurrentPlayTime(target);
+  };
+
+  const handleToggleSpeed = () => {
+    const speeds = [0.75, 1, 1.25, 1.5, 2];
+    const nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
+    const nextSpeed = speeds[nextIdx];
+    setPlaybackSpeed(nextSpeed);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = nextSpeed;
+    }
+  };
+
+  const handleToggleMute = () => {
+    if (!videoRef.current) return;
+    const next = !isMuted;
+    videoRef.current.muted = next;
+    setIsMuted(next);
+  };
+
+  const handleVolumeChange = (newVol: number) => {
+    if (!videoRef.current) return;
+    videoRef.current.volume = newVol;
+    setVolume(newVol);
+    if (newVol > 0 && isMuted) {
+      videoRef.current.muted = false;
+      setIsMuted(false);
+    }
+  };
+
+  const handleFullscreen = () => {
+    if (!videoRef.current) return;
+    if (videoRef.current.requestFullscreen) {
+      videoRef.current.requestFullscreen();
+    }
+  };
+
+  // Download Single Clip directly from list card in 1 click
+  const handleDownloadSingleClip = async (clip: ViralClip) => {
+    if (!job?.videoUrl) return;
+
+    setRenderingClipId(clip.id);
+    try {
+      const trim = clipTrims[clip.id];
+      const startTime = trim?.start ?? clip.startTime;
+      const endTime = trim?.end ?? clip.endTime;
+      const headlineText = customHeadlines[clip.id] ?? clip.suggestedHeadline ?? '';
+
+      const res = await fetch(`${API_URL}/api/shorts/render-clip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceVideoUrl: job.videoUrl,
+          startTime,
+          endTime,
+          aspectRatio,
+          headlineText,
+        }),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        let errorMsg = `Download failed (${res.status})`;
+        if (contentType.includes('application/json')) {
+          const errData = await res.json().catch(() => null);
+          if (errData?.error) errorMsg = errData.error;
+        }
+        throw new Error(errorMsg);
+      }
+
+      const data = await res.json();
+      if (!data.success || !data.clipUrl) {
+        throw new Error(data.error || 'Rendering clip failed');
+      }
+
+      const fullUrl = `${API_URL}${data.clipUrl}`;
+      setRenderedDownloadUrl(fullUrl);
+      setSelectedClipId(clip.id);
+      const safeTitle = (clip.title || 'short').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      triggerBrowserDownload(fullUrl, `${safeTitle}.mp4`);
+    } catch (err: any) {
+      console.error('Single download error:', err);
+      setErrorMessage(err.message || 'Failed to download clip.');
+    } finally {
+      setRenderingClipId(null);
+    }
+  };
+
+  // Single Click to Download ALL Clips at once in a ZIP bundle
+  const handleDownloadAllZip = async () => {
+    if (!job?.id || clips.length === 0) return;
+
+    setIsBatchRendering(true);
+    setBatchProgressMsg(`Fast rendering and packaging all ${clips.length} clips into ZIP...`);
+    setBatchDownloadUrl(null);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/shorts/download-all-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: job.id,
+          aspectRatio,
+          customHeadlines,
+          clipTrims,
+        }),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        let errorMsg = `Batch export returned status ${res.status}`;
+        if (contentType.includes('application/json')) {
+          const errData = await res.json().catch(() => null);
+          if (errData?.error) errorMsg = errData.error;
+        } else {
+          errorMsg = `Backend API returned status ${res.status}.`;
+        }
+        throw new Error(errorMsg);
+      }
+
+      const data = await res.json();
+      if (!data.success || !data.zipUrl) {
+        throw new Error(data.error || 'Failed to generate ZIP bundle');
+      }
+
+      const fullZipUrl = `${API_URL}${data.zipUrl}`;
+      setBatchDownloadUrl(fullZipUrl);
+      setBatchProgressMsg(`Complete! All ${data.totalClips} shorts packaged in ZIP.`);
+      triggerBrowserDownload(fullZipUrl, data.zipFilename || `cinemiq-shorts-${job.id}.zip`);
+    } catch (err: any) {
+      console.error('Batch export error:', err);
+      setErrorMessage(err.message || 'Failed to download all clips at once.');
+    } finally {
+      setIsBatchRendering(false);
+    }
+  };
+
   // Render & Download the Short via FFmpeg
   const handleRenderShort = async () => {
     if (!activeClip || !job?.videoUrl) return;
@@ -346,7 +545,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         throw new Error(data.error || 'Rendering clip failed');
       }
 
-      setRenderedDownloadUrl(`${API_URL}${data.clipUrl}`);
+      const fullUrl = `${API_URL}${data.clipUrl}`;
+      setRenderedDownloadUrl(fullUrl);
+      const safeTitle = (activeClip.title || 'short').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      triggerBrowserDownload(fullUrl, `${safeTitle}.mp4`);
     } catch (err: any) {
       console.error('Render error:', err);
       setErrorMessage(err.message || 'Failed to render short.');
@@ -759,6 +961,61 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 </div>
               )}
 
+              {/* Batch Export All Clips Hero Banner */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/70 via-zinc-900 to-teal-950/70 border border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg shadow-emerald-950/40">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                    <Archive size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                      Batch Export All Clips (ZIP)
+                    </h3>
+                    <p className="text-[10px] text-zinc-400">
+                      Render and package all {clips.length} shorts into a single ZIP archive in 1 click
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadAllZip}
+                  disabled={isBatchRendering}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 disabled:opacity-50 text-black font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 active:scale-95 transition-all shrink-0 cursor-pointer"
+                >
+                  {isBatchRendering ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin text-black" />
+                      <span>{batchProgressMsg || 'Packaging ZIP...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={14} className="fill-black" />
+                      <span>Download All ({clips.length}) Shorts (ZIP)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Ready ZIP Download Alert */}
+              {batchDownloadUrl && (
+                <div className="p-3.5 rounded-xl bg-emerald-950/50 border border-emerald-500/50 flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold truncate">
+                    <CheckCircle2 size={16} />
+                    <span>{batchProgressMsg || 'ZIP Archive Ready!'}</span>
+                  </div>
+                  <a
+                    href={batchDownloadUrl}
+                    download={`cinemiq-shorts-${job.id}.zip`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all"
+                  >
+                    Download ZIP Again
+                  </a>
+                </div>
+              )}
+
               {/* Clips List */}
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
@@ -807,26 +1064,51 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           : 'bg-zinc-950/40 border-zinc-850 hover:border-zinc-750 hover:bg-zinc-900/40'
                       }`}
                     >
-                      {/* Top Row: Title + Virality Badge */}
+                      {/* Top Row: Title + Virality Badge + 1-Click Download */}
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-2.5">
+                        <div className="flex items-start gap-2.5 min-w-0">
                           <span className="w-5 h-5 rounded-md bg-zinc-850 text-zinc-400 flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">
                             #{index + 1}
                           </span>
-                          <div>
-                            <h4 className="text-xs font-bold text-zinc-100">
+                          <div className="min-w-0">
+                            <h4 className="text-xs font-bold text-zinc-100 truncate">
                               {clip.title}
                             </h4>
-                            <p className="text-[11px] text-zinc-400 italic mt-0.5">
+                            <p className="text-[11px] text-zinc-400 italic mt-0.5 truncate">
                               Hook: {clip.hook}
                             </p>
                           </div>
                         </div>
 
-                        {/* Virality score badge */}
-                        <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-black shrink-0">
-                          <Flame size={12} className="text-rose-400" />
-                          <span>{clip.viralityScore}% Viral</span>
+                        {/* Quick 1-click download button & Virality score */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownloadSingleClip(clip);
+                            }}
+                            disabled={renderingClipId === clip.id}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-900 hover:bg-rose-500/20 border border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-rose-300 text-[10px] font-bold transition-all shrink-0 cursor-pointer"
+                            title="1-Click Save Short (MP4)"
+                          >
+                            {renderingClipId === clip.id ? (
+                              <>
+                                <RefreshCw size={11} className="animate-spin text-rose-400" />
+                                <span>Saving...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Download size={11} className="text-rose-400" />
+                                <span>Save Short</span>
+                              </>
+                            )}
+                          </button>
+
+                          <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-black shrink-0">
+                            <Flame size={12} className="text-rose-400" />
+                            <span>{clip.viralityScore}%</span>
+                          </div>
                         </div>
                       </div>
 
@@ -1027,12 +1309,63 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         {/* Floating Play/Pause overlay */}
                         <button
                           onClick={togglePlay}
-                          className="absolute inset-0 z-20 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-all opacity-0 hover:opacity-100"
+                          className="absolute inset-0 z-10 flex items-center justify-center bg-black/20 hover:bg-black/35 transition-all opacity-0 hover:opacity-100"
                         >
-                          <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white">
+                          <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white shadow-xl">
                             {isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
                           </div>
                         </button>
+
+                        {/* In-Phone Floating Mini Player HUD */}
+                        <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 bg-black/70 backdrop-blur-md rounded-xl p-2 flex items-center justify-between border border-white/10 text-white shadow-xl">
+                          <button
+                            type="button"
+                            onClick={togglePlay}
+                            className="w-7 h-7 rounded-lg bg-rose-500 hover:bg-rose-400 flex items-center justify-center transition-all shrink-0 cursor-pointer"
+                            title={isPlaying ? 'Pause' : 'Play'}
+                          >
+                            {isPlaying ? <Pause size={12} /> : <Play size={12} className="ml-0.5" />}
+                          </button>
+
+                          <div className="flex-1 mx-2">
+                            <div className="flex justify-between text-[9px] font-mono text-zinc-300">
+                              <span>{formatTime(currentProgressSec)}</span>
+                              <span>{formatTime(clipDuration)}</span>
+                            </div>
+                            <div
+                              onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const pct = (e.clientX - rect.left) / rect.width;
+                                handleSeek(pct * clipDuration);
+                              }}
+                              className="w-full bg-zinc-800 h-1.5 rounded-full cursor-pointer relative overflow-hidden mt-0.5"
+                            >
+                              <div
+                                className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full"
+                                style={{ width: `${(currentProgressSec / clipDuration) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={handleToggleMute}
+                              className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                              title={isMuted ? 'Unmute' : 'Mute'}
+                            >
+                              {isMuted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleFullscreen}
+                              className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                              title="Fullscreen"
+                            >
+                              <Maximize2 size={13} />
+                            </button>
+                          </div>
+                        </div>
                       </>
                     ) : (
                       <div className="text-zinc-600 text-xs text-center p-4">
@@ -1042,18 +1375,115 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                   </div>
                 </div>
 
-                {/* Preview Time Scrubber Info */}
-                <div className="w-full flex items-center justify-between text-[11px] font-mono text-zinc-500 px-2">
-                  <span>Current: {formatTime(currentPlayTime)}</span>
-                  <span>Clip: {formatTime(currentStart)} - {formatTime(currentEnd)}</span>
+                {/* Enhanced Interactive Scrubber Bar */}
+                <div className="w-full flex flex-col gap-1 px-1">
+                  <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
+                    <span className="text-rose-400 font-bold">{formatTime(currentProgressSec)}</span>
+                    <span className="text-zinc-500 text-[10px]">Timeline: {formatTime(currentStart)} - {formatTime(currentEnd)}</span>
+                    <span className="text-zinc-300 font-bold">{formatTime(clipDuration)}</span>
+                  </div>
+
+                  <div className="relative flex items-center group">
+                    <input
+                      type="range"
+                      min="0"
+                      max={clipDuration}
+                      step="0.1"
+                      value={currentProgressSec}
+                      onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                      className="w-full h-2 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Comprehensive Video Transport Controls Dock */}
+                <div className="w-full p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 flex items-center justify-between gap-2 shadow-inner">
+                  {/* Left: Rewind, Play/Pause, Fast-forward */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleSkip(-5)}
+                      className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white transition-all text-xs cursor-pointer active:scale-95"
+                      title="Rewind 5s"
+                    >
+                      <Rewind size={14} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={togglePlay}
+                      className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 active:scale-95 transition-all cursor-pointer"
+                    >
+                      {isPlaying ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
+                      <span>{isPlaying ? 'Pause' : 'Play'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSkip(5)}
+                      className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white transition-all text-xs cursor-pointer active:scale-95"
+                      title="Fast forward 5s"
+                    >
+                      <FastForward size={14} />
+                    </button>
+                  </div>
+
+                  {/* Center: Playback Speed & Loop Toggle */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={handleToggleSpeed}
+                      className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[10px] font-mono font-bold transition-all cursor-pointer"
+                      title="Playback Speed"
+                    >
+                      {playbackSpeed}x
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsLooping(!isLooping)}
+                      className={`p-1.5 rounded-md border transition-all cursor-pointer ${
+                        isLooping
+                          ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
+                          : 'bg-zinc-800 border-zinc-750 text-zinc-500'
+                      }`}
+                      title={isLooping ? 'Auto-looping ON' : 'Auto-looping OFF'}
+                    >
+                      <Repeat size={13} />
+                    </button>
+                  </div>
+
+                  {/* Right: Volume slider */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleToggleMute}
+                      className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                      title={isMuted ? 'Unmute' : 'Mute'}
+                    >
+                      {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={isMuted ? 0 : volume}
+                      onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                      className="w-14 h-1.5 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer"
+                      title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                    />
+                  </div>
                 </div>
 
                 {/* Primary Action Buttons */}
                 <div className="w-full flex flex-col gap-2.5">
+                  {/* Single Short Fast Render & Download */}
                   <button
+                    type="button"
                     onClick={handleRenderShort}
                     disabled={isRendering}
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-rose-500/25 active:scale-95 transition-all"
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-rose-500/25 active:scale-95 transition-all cursor-pointer"
                   >
                     {isRendering ? (
                       <>
@@ -1062,36 +1492,76 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       </>
                     ) : (
                       <>
-                        <Download size={14} />
-                        <span>Render & Download Short (MP4)</span>
+                        <Zap size={15} />
+                        <span>⚡ Fast Render & Download This Short (MP4)</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* 1-Click Download ALL Clips in a ZIP bundle */}
+                  <button
+                    type="button"
+                    onClick={handleDownloadAllZip}
+                    disabled={isBatchRendering}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-95 transition-all cursor-pointer"
+                  >
+                    {isBatchRendering ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>{batchProgressMsg || 'Packaging all clips into ZIP...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Archive size={15} />
+                        <span>📦 Download All ({clips.length}) Shorts at Once (ZIP)</span>
                       </>
                     )}
                   </button>
 
                   <button
+                    type="button"
                     onClick={handleSendToTimeline}
-                    className="w-full py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all"
+                    className="w-full py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
                   >
-                    <Sliders size={14} />
+                    <Sliders size={13} />
                     <span>Open in Timeline Editor</span>
                   </button>
                 </div>
 
-                {/* Render Success / Download Link */}
-                {renderedDownloadUrl && (
+                {/* Batch ZIP Ready Alert */}
+                {batchDownloadUrl && (
                   <div className="w-full p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between gap-3 text-xs animate-in fade-in">
                     <div className="flex items-center gap-2 text-emerald-400 font-bold truncate">
-                      <CheckCircle2 size={16} />
-                      <span>Ready to save!</span>
+                      <Archive size={16} />
+                      <span className="truncate">All Shorts ZIP Ready!</span>
+                    </div>
+                    <a
+                      href={batchDownloadUrl}
+                      download={`cinemiq-shorts-${job.id}.zip`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
+                    >
+                      Save ZIP
+                    </a>
+                  </div>
+                )}
+
+                {/* Single Render Success / Download Link */}
+                {renderedDownloadUrl && (
+                  <div className="w-full p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                    <div className="flex items-center gap-2 text-rose-300 font-bold truncate">
+                      <CheckCircle2 size={16} className="text-emerald-400" />
+                      <span className="truncate">Short MP4 Ready!</span>
                     </div>
                     <a
                       href={renderedDownloadUrl}
                       download="cinemiq-short.mp4"
                       target="_blank"
                       rel="noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all"
+                      className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
                     >
-                      Download MP4
+                      Save MP4
                     </a>
                   </div>
                 )}

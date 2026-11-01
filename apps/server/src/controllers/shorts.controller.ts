@@ -120,6 +120,44 @@ export const ShortsController = {
   },
 
   /**
+   * Render and bundle all highlight clips into a single ZIP file
+   */
+  async downloadAllZip(req: Request, res: Response): Promise<void> {
+    try {
+      const {
+        jobId,
+        aspectRatio = '9:16-blur',
+        customHeadlines = {},
+        clipTrims = {},
+      } = req.body;
+
+      if (!jobId) {
+        res.status(400).json({ error: 'jobId is required' });
+        return;
+      }
+
+      console.log(`📦 [Shorts] Batch rendering and packaging all clips for job: ${jobId}`);
+
+      const result = await ShortsService.renderAllClipsZip({
+        jobId,
+        aspectRatio,
+        customHeadlines,
+        clipTrims,
+      });
+
+      res.json({
+        success: true,
+        zipUrl: result.zipUrl,
+        totalClips: result.totalClips,
+        zipFilename: result.zipFilename,
+      });
+    } catch (err: any) {
+      console.error('Batch export ZIP error:', err);
+      res.status(500).json({ error: err.message || 'Failed to create zip bundle' });
+    }
+  },
+
+  /**
    * Upload a local video file and kick off highlight analysis
    */
   async uploadLocal(req: Request, res: Response): Promise<void> {
@@ -153,7 +191,7 @@ export const ShortsController = {
       };
 
       // Set job in map
-      (ShortsService as any).activeJobs?.set?.(jobId, job);
+      ShortsService.setJob(jobId, job);
 
       // Probe duration if possible and generate clips
       const clips = ShortsService.generateAlgorithmicClips(

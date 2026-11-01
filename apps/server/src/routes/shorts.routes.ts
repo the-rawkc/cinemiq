@@ -38,6 +38,9 @@ router.get('/status/:jobId', ShortsController.getStatus);
 // Render Short Clip (9:16 blurred/crop + text overlay)
 router.post('/render-clip', ShortsController.renderClip);
 
+// Render & Download All Clips in a Single ZIP Archive
+router.post('/download-all-zip', ShortsController.downloadAllZip);
+
 // Upload Local Video directly
 router.post('/upload-local', upload.single('video'), ShortsController.uploadLocal);
 

@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
+import archiver from 'archiver';
 import OpenAI from 'openai';
 
 export interface VideoInfo {
@@ -42,6 +43,9 @@ export interface ShortsJob {
 
 // In-memory active jobs store
 const activeJobs = new Map<string, ShortsJob>();
+
+// In-memory render cache for 0ms repeat exports
+const renderCache = new Map<string, { url: string; duration: number; filePath: string }>();
 
 let openaiClient: OpenAI | null = null;
 function getOpenAI(): OpenAI | null {
@@ -229,6 +233,10 @@ export const ShortsService = {
    */
   getJobStatus(jobId: string): ShortsJob | null {
     return activeJobs.get(jobId) || null;
+  },
+
+  setJob(jobId: string, job: ShortsJob): void {
+    activeJobs.set(jobId, job);
   },
 
   /**
@@ -745,6 +753,13 @@ ${transcriptText}`;
       .replace(/\]/g, '\\]')
       .trim();
 
+    // Check fast render cache
+    const cacheKey = `${sourceVideoPath}_${startTime}_${endTime}_${aspectRatio}_${cleanHeadline}`;
+    const cached = renderCache.get(cacheKey);
+    if (cached && fs.existsSync(cached.filePath)) {
+      return cached;
+    }
+
     if (aspectRatio === '9:16-blur') {
       // Opus Clip style: 1080x1920 background blurred (optimized by downscaling before blur), 1080 width foreground sharp in center
       filterComplex =
@@ -790,21 +805,25 @@ ${transcriptText}`;
         .complexFilter(filterComplex, ['v'])
         .outputOptions([
           '-c:v libx264',
-          '-preset veryfast',
-          '-crf 22',
+          '-preset ultrafast',
+          '-crf 23',
+          '-tune fastdecode',
+          '-threads 0',
           '-c:a aac',
-          '-b:a 192k',
+          '-b:a 128k',
           '-pix_fmt yuv420p',
           '-movflags +faststart',
         ])
         .output(outputPath);
 
       cmd.on('end', () => {
-        resolve({
+        const result = {
           url: `/uploads/shorts/${outputFilename}`,
           duration,
           filePath: outputPath,
-        });
+        };
+        renderCache.set(cacheKey, result);
+        resolve(result);
       });
 
       cmd.on('error', (err, stdout, stderr) => {
@@ -814,5 +833,102 @@ ${transcriptText}`;
 
       cmd.run();
     });
+  },
+
+  /**
+   * Render and package all clips from a job into a single ZIP archive
+   */
+  async renderAllClipsZip(params: {
+    jobId: string;
+    aspectRatio?: '9:16-blur' | '9:16-crop' | '16:9-fit' | 'original';
+    customHeadlines?: Record<string, string>;
+    clipTrims?: Record<string, { start: number; end: number }>;
+  }): Promise<{ zipUrl: string; totalClips: number; zipFilename: string }> {
+    const job = activeJobs.get(params.jobId);
+    if (!job || !job.videoPath || !fs.existsSync(job.videoPath)) {
+      throw new Error(`Job or source video not found for ID: ${params.jobId}`);
+    }
+
+    const clips = job.clips || [];
+    if (clips.length === 0) {
+      throw new Error('No clips available in this job to export');
+    }
+
+    const aspectRatio = params.aspectRatio || '9:16-blur';
+    const uploadsDir = getUploadsDir();
+    const zipFilename = `cinemiq-shorts-${params.jobId}.zip`;
+    const zipPath = path.join(uploadsDir, zipFilename);
+
+    // If zip was already generated recently and exists, return immediately
+    if (fs.existsSync(zipPath)) {
+      const stats = fs.statSync(zipPath);
+      if (Date.now() - stats.mtimeMs < 300000) {
+        return {
+          zipUrl: `/uploads/shorts/${zipFilename}`,
+          totalClips: clips.length,
+          zipFilename,
+        };
+      }
+    }
+
+    // Render clips in chunks of 3 for ultra-fast throughput without CPU exhaustion
+    const renderedFiles: Array<{ title: string; filePath: string }> = [];
+    const chunkSize = 3;
+
+    for (let i = 0; i < clips.length; i += chunkSize) {
+      const chunk = clips.slice(i, i + chunkSize);
+      const results = await Promise.all(
+        chunk.map(async (clip, idx) => {
+          const clipIndex = i + idx;
+          const trim = params.clipTrims?.[clip.id];
+          const startTime = trim?.start ?? clip.startTime;
+          const endTime = trim?.end ?? clip.endTime;
+          const headlineText = params.customHeadlines?.[clip.id] ?? clip.suggestedHeadline ?? '';
+
+          const res = await this.renderShortClip({
+            sourceVideoPath: job.videoPath!,
+            startTime,
+            endTime,
+            aspectRatio,
+            headlineText,
+          });
+
+          return {
+            title: clip.title || `Short-${clipIndex + 1}`,
+            filePath: res.filePath,
+          };
+        })
+      );
+      renderedFiles.push(...results);
+    }
+
+    // Package all rendered clips into a zip archive
+    await new Promise<void>((resolve, reject) => {
+      const output = fs.createWriteStream(zipPath);
+      const archive = archiver('zip', { zlib: { level: 4 } });
+
+      output.on('close', () => resolve());
+      archive.on('error', (err) => reject(err));
+
+      archive.pipe(output);
+
+      for (let idx = 0; idx < renderedFiles.length; idx++) {
+        const item = renderedFiles[idx];
+        const cleanTitle = item.title
+          .replace(/[^a-zA-Z0-9_\- ]/g, '')
+          .trim()
+          .substring(0, 45) || `clip-${idx + 1}`;
+        const entryName = `${String(idx + 1).padStart(2, '0')} - ${cleanTitle}.mp4`;
+        archive.file(item.filePath, { name: entryName });
+      }
+
+      archive.finalize();
+    });
+
+    return {
+      zipUrl: `/uploads/shorts/${zipFilename}`,
+      totalClips: renderedFiles.length,
+      zipFilename,
+    };
   },
 };
