@@ -38,6 +38,9 @@ router.get('/status/:jobId', ShortsController.getStatus);
 // Render Short Clip (9:16 blurred/crop + text overlay)
 router.post('/render-clip', ShortsController.renderClip);
 
+// Direct force-download endpoint with attachment disposition
+router.get('/download-file', ShortsController.downloadFile);
+
 // Render & Download All Clips in a Single ZIP Archive
 router.post('/download-all-zip', ShortsController.downloadAllZip);
 

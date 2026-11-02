@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { ShortsService } from '../services/shorts.service';
+import { ShortsService, getUploadsDir } from '../services/shorts.service';
 
 export const ShortsController = {
   /**
@@ -74,6 +74,8 @@ export const ShortsController = {
     try {
       const {
         sourceVideoUrl,
+        jobId,
+        youtubeUrl,
         startTime = 0,
         endTime = 30,
         aspectRatio = '9:16-blur',
@@ -81,31 +83,69 @@ export const ShortsController = {
         targetResolution = '720p',
       } = req.body;
 
-      if (!sourceVideoUrl) {
-        res.status(400).json({ error: 'sourceVideoUrl is required' });
-        return;
+      // 1. Resolve disk path from sourceVideoUrl if provided
+      let diskPath: string | null = null;
+      if (sourceVideoUrl) {
+        const cleanRel = (sourceVideoUrl.startsWith('http')
+          ? new URL(sourceVideoUrl).pathname
+          : sourceVideoUrl
+        ).replace(/^\//, '');
+
+        const filename = path.basename(cleanRel);
+        const candidates = [
+          path.resolve(process.cwd(), cleanRel),
+          path.resolve(process.cwd(), '..', cleanRel),
+          path.resolve(process.cwd(), '..', '..', cleanRel),
+          path.join(getUploadsDir(), filename),
+          path.resolve(process.cwd(), 'uploads', 'shorts', filename),
+          path.resolve(process.cwd(), '..', 'uploads', 'shorts', filename),
+        ];
+
+        for (const c of candidates) {
+          if (fs.existsSync(c)) {
+            diskPath = c;
+            break;
+          }
+        }
       }
 
-      // Convert URL to absolute disk path
-      let diskPath: string;
-      if (sourceVideoUrl.startsWith('http')) {
-        const parsed = new URL(sourceVideoUrl);
-        diskPath = path.resolve(process.cwd(), parsed.pathname.replace(/^\//, ''));
-      } else {
-        diskPath = path.resolve(process.cwd(), sourceVideoUrl.replace(/^\//, ''));
+      // 2. Check if jobId has an existing videoPath on disk
+      if ((!diskPath || !fs.existsSync(diskPath)) && jobId) {
+        const job = ShortsService.getJobStatus(jobId);
+        if (job?.videoPath && fs.existsSync(job.videoPath)) {
+          diskPath = job.videoPath;
+        }
       }
 
-      if (!fs.existsSync(diskPath)) {
-        res.status(404).json({ error: `Source video not found: ${diskPath}` });
-        return;
+      // 3. Fast On-Demand Fallback: If full video stream is still buffering in background,
+      // download JUST this 15-30s section in ~1 second so user is never blocked!
+      let sliceStart = parseFloat(startTime);
+      let sliceEnd = parseFloat(endTime);
+
+      if (!diskPath || !fs.existsSync(diskPath)) {
+        const targetUrl = youtubeUrl || (jobId ? ShortsService.getJobStatus(jobId)?.url : null);
+        if (targetUrl) {
+          console.log(`⚡ [Shorts] Fast on-demand section download for ${startTime}s -> ${endTime}s...`);
+          diskPath = await ShortsService.downloadClipSection({
+            url: targetUrl,
+            startTime: sliceStart,
+            endTime: sliceEnd,
+          });
+          // Since the section file contains only this range, FFmpeg start is 0
+          sliceEnd = sliceEnd - sliceStart;
+          sliceStart = 0;
+        } else {
+          res.status(404).json({ error: 'Source video or YouTube URL not found on disk' });
+          return;
+        }
       }
 
-      console.log(`🎬 [Shorts] Rendering clip: ${startTime}s -> ${endTime}s, ratio: ${aspectRatio}, resolution: ${targetResolution}`);
+      console.log(`🎬 [Shorts] Rendering clip: ${sliceStart}s -> ${sliceEnd}s, ratio: ${aspectRatio}, resolution: ${targetResolution}`);
 
       const result = await ShortsService.renderShortClip({
         sourceVideoPath: diskPath,
-        startTime: parseFloat(startTime),
-        endTime: parseFloat(endTime),
+        startTime: sliceStart,
+        endTime: sliceEnd,
         aspectRatio,
         headlineText,
         targetResolution,
@@ -120,6 +160,53 @@ export const ShortsController = {
       console.error('Failed to render short clip:', err);
       res.status(500).json({ error: err.message || 'Rendering clip failed' });
     }
+  },
+
+  /**
+   * Dedicated force-download endpoint with Content-Disposition: attachment header
+   * Guarantees browser native download without cross-origin blocking or opening in new tab
+   */
+  downloadFile(req: Request, res: Response): void {
+    const fileParam = (req.query.file as string) || (req.query.url as string) || '';
+    const filenameParam = (req.query.filename as string) || 'short.mp4';
+
+    if (!fileParam) {
+      res.status(400).send('File parameter is required');
+      return;
+    }
+
+    const cleanFile = fileParam
+      .replace(/^https?:\/\/[^\/]+/, '')
+      .replace(/^\/uploads\/shorts\//, '')
+      .replace(/^uploads\/shorts\//, '')
+      .replace(/^.*[\\\/]/, '');
+
+    const candidates = [
+      path.join(getUploadsDir(), cleanFile),
+      path.resolve(process.cwd(), 'uploads', 'shorts', cleanFile),
+      path.resolve(process.cwd(), '..', 'uploads', 'shorts', cleanFile),
+      path.resolve(process.cwd(), 'apps', 'server', 'uploads', 'shorts', cleanFile),
+    ];
+
+    let targetPath: string | null = null;
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        targetPath = c;
+        break;
+      }
+    }
+
+    if (!targetPath) {
+      res.status(404).send('File not found');
+      return;
+    }
+
+    res.download(targetPath, filenameParam, (err) => {
+      if (err && !res.headersSent) {
+        console.error('Download file error:', err);
+        res.status(500).send('Download failed');
+      }
+    });
   },
 
   /**

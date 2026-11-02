@@ -70,6 +70,7 @@ interface DownloadProgress {
 
 interface ShortsJob {
   id: string;
+  url?: string;
   status: 'pending' | 'downloading' | 'analyzing' | 'done' | 'failed';
   progress: number;
   stage: string;
@@ -534,11 +535,31 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   };
 
   // Helper to trigger fast direct file download in browser
-  const triggerBrowserDownload = (url: string, filename?: string) => {
+  const triggerBrowserDownload = async (url: string, filename?: string) => {
+    try {
+      // 1. Fetch as blob to guarantee cross-origin download attribute works in Chrome/Edge/Firefox
+      const response = await fetch(url);
+      if (response.ok) {
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        if (filename) a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+        return;
+      }
+    } catch (e) {
+      console.warn('Direct blob download failed, falling back to server download route:', e);
+    }
+
+    // 2. Direct server download endpoint with Content-Disposition: attachment header
+    const cleanFile = url.replace(API_URL, '').replace(/^\/uploads\/shorts\//, '');
+    const serverUrl = `${API_URL}/api/shorts/download-file?file=${encodeURIComponent(cleanFile)}&filename=${encodeURIComponent(filename || 'short.mp4')}`;
     const a = document.createElement('a');
-    a.href = url;
-    if (filename) a.download = filename;
-    a.target = '_blank';
+    a.href = serverUrl;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -613,11 +634,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
   // Download Single Clip directly from list card in 1 click with full title name
   const handleDownloadSingleClip = async (clip: ViralClip) => {
-    if (!job?.videoUrl) {
-      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). It will be ready to download in moments!`);
-      return;
-    }
-
     setRenderingClipId(clip.id);
     try {
       const trim = clipTrims[clip.id];
@@ -629,7 +645,9 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceVideoUrl: job.videoUrl,
+          sourceVideoUrl: job?.videoUrl,
+          jobId: job?.id,
+          youtubeUrl: job?.url || youtubeUrl,
           startTime,
           endTime,
           aspectRatio,
@@ -658,7 +676,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       setSelectedClipId(clip.id);
       const clipIndex = clips.findIndex((c) => c.id === clip.id);
       const fullFilename = getFullShortFilename(
-        job.videoInfo?.title,
+        job?.videoInfo?.title,
         clip.title,
         clipIndex >= 0 ? clipIndex : undefined
       );
@@ -748,10 +766,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   // Render & Download the Short via FFmpeg with smooth progress and full title name
   const handleRenderShort = async () => {
     if (!activeClip) return;
-    if (!job?.videoUrl) {
-      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Please wait a few seconds!`);
-      return;
-    }
 
     setIsRendering(true);
     setRenderDisplayPercent(0);
@@ -768,7 +782,9 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceVideoUrl: job.videoUrl,
+          sourceVideoUrl: job?.videoUrl,
+          jobId: job?.id,
+          youtubeUrl: job?.url || youtubeUrl,
           startTime: currentStart,
           endTime: currentEnd,
           aspectRatio,
@@ -802,7 +818,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       setRenderedDownloadUrl(fullUrl);
       const clipIndex = clips.findIndex((c) => c.id === activeClip.id);
       const fullFilename = getFullShortFilename(
-        job.videoInfo?.title,
+        job?.videoInfo?.title,
         activeClip.title,
         clipIndex >= 0 ? clipIndex : undefined
       );

@@ -73,12 +73,19 @@ function getOpenAI(): OpenAI | null {
   return openaiClient;
 }
 
-function getUploadsDir(): string {
-  const dir = path.resolve(process.cwd(), 'uploads', 'shorts');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+export function getUploadsDir(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'uploads', 'shorts'),
+    path.resolve(process.cwd(), 'apps', 'server', 'uploads', 'shorts'),
+    path.resolve(process.cwd(), '..', 'uploads', 'shorts'),
+    path.resolve(process.cwd(), '..', '..', 'uploads', 'shorts'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
   }
-  return dir;
+  const defaultDir = candidates[0];
+  fs.mkdirSync(defaultDir, { recursive: true });
+  return defaultDir;
 }
 
 function getYtDlpBinary(): string {
@@ -180,7 +187,7 @@ export const ShortsService = {
     const ytId = extractYouTubeId(url);
     const uploadsDir = getUploadsDir();
 
-    // Instant local metadata cache check
+    // 1. Instant local metadata cache check
     if (ytId) {
       const infoPath = path.join(uploadsDir, `yt-${ytId}.info.json`);
       if (fs.existsSync(infoPath)) {
@@ -194,6 +201,56 @@ export const ShortsService = {
         } catch {}
       }
     }
+
+    // 2. Fast oEmbed metadata lookup (~100ms)
+    try {
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+      if (oembedRes.ok) {
+        const odata = await oembedRes.json() as any;
+        if (odata && odata.title) {
+          console.log(`⚡ [Shorts] Instant oEmbed metadata hit: ${odata.title}`);
+          const info: VideoInfo = {
+            id: ytId || 'unknown',
+            title: odata.title,
+            duration: 180,
+            thumbnail: odata.thumbnail_url || (ytId ? `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg` : ''),
+            channel: odata.author_name || 'YouTube',
+            description: '',
+            webpage_url: url,
+            view_count: 50000,
+            tags: ['#shorts', '#viral', '#trending'],
+            categories: [],
+          };
+
+          // Save to disk immediately so future requests are 0ms
+          if (ytId) {
+            try {
+              fs.writeFileSync(path.join(uploadsDir, `yt-${ytId}.info.json`), JSON.stringify(info, null, 2));
+            } catch {}
+          }
+
+          // Asynchronously query exact duration without blocking the user
+          (async () => {
+            try {
+              const durProc = spawn(getYtDlpBinary(), ['--skip-download', '--print', '%(duration)s', url], { windowsHide: true });
+              let durOut = '';
+              durProc.stdout.on('data', (d) => (durOut += d.toString()));
+              durProc.on('close', () => {
+                const sec = parseInt(durOut.trim(), 10);
+                if (sec > 0 && ytId) {
+                  info.duration = sec;
+                  try {
+                    fs.writeFileSync(path.join(uploadsDir, `yt-${ytId}.info.json`), JSON.stringify(info, null, 2));
+                  } catch {}
+                }
+              });
+            } catch {}
+          })();
+
+          return info;
+        }
+      }
+    } catch {}
 
     return new Promise((resolve, reject) => {
       const args = [
@@ -972,8 +1029,8 @@ ${transcriptText}`;
     const is1080p = params.targetResolution === '1080p';
     const targetW = is1080p ? 1080 : 720;
     const targetH = is1080p ? 1920 : 1280;
-    // Ambient blur downscale surface: 90x160 (1080p) or 64x114 (720p) for 100x faster processing
-    const bgScale = is1080p ? '90:160' : '64:114';
+    // Ambient blur downscale surface: 90x160 (1080p) or 72x128 (720p) for exact 9:16 aspect ratio
+    const bgScale = is1080p ? '90:160' : '72:128';
     const fontSize = is1080p ? 48 : 34;
     const textY = is1080p ? 240 : 160;
 
@@ -1026,7 +1083,7 @@ ${transcriptText}`;
       filterComplex =
         '[0:v]split=2[in1][in2];' +
         `[in1]scale=${bgScale}:flags=fast_bilinear:force_original_aspect_ratio=increase,crop=${bgScale},boxblur=3:1,scale=${targetW}:${targetH}:flags=fast_bilinear[bg];` +
-        `[in2]scale=${targetW}:-2:flags=fast_bilinear[fg];` +
+        `[in2]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=fast_bilinear[fg];` +
         '[bg][fg]overlay=(W-w)/2:(H-h)/2:eval=init[base]';
       
       if (cleanHeadline) {
@@ -1044,7 +1101,7 @@ ${transcriptText}`;
       }
     } else if (aspectRatio === '16:9-fit') {
       // 9:16 Canvas with black bars
-      filterComplex = `[0:v]scale=${targetW}:-2:flags=fast_bilinear,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:black[base]`;
+      filterComplex = `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=fast_bilinear,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:black[base]`;
       if (cleanHeadline) {
         filterComplex += `;[base]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v]`;
       } else {
@@ -1062,9 +1119,10 @@ ${transcriptText}`;
     return new Promise((resolve, reject) => {
       const cmd = ffmpeg()
         .input(sourceVideoPath)
-        .inputOptions([`-ss ${startTime}`, `-t ${duration}`])
+        .inputOptions([`-ss ${startTime}`])
         .complexFilter(filterComplex, ['v'])
         .outputOptions([
+          `-t ${duration}`,
           '-map 0:a?',
           '-c:v libx264',
           '-preset ultrafast',
@@ -1097,6 +1155,63 @@ ${transcriptText}`;
 
       cmd.run();
     });
+  },
+
+  /**
+   * Fast on-demand download of a specific video time range (e.g. 15-30s)
+   * Completes in ~1-2 seconds without downloading full-length video
+   */
+  async downloadClipSection(params: {
+    url: string;
+    startTime: number;
+    endTime: number;
+  }): Promise<string> {
+    const { url, startTime, endTime } = params;
+    const uploadsDir = getUploadsDir();
+    const cleanId = (extractYouTubeId(url) || 'clip').replace(/[^a-zA-Z0-9_\-]/g, '');
+    const hash = crypto.createHash('md5').update(`${url}_${startTime}_${endTime}`).digest('hex').substring(0, 8);
+    const outputPath = path.join(uploadsDir, `sec-${cleanId}-${hash}.mp4`);
+
+    if (fs.existsSync(outputPath)) {
+      try {
+        if (fs.statSync(outputPath).size > 10000) return outputPath;
+      } catch {}
+    }
+
+    const startSec = Math.max(0, Math.floor(startTime));
+    const endSec = Math.max(startSec + 1, Math.ceil(endTime));
+    const startStr = new Date(startSec * 1000).toISOString().substring(11, 19);
+    const endStr = new Date(endSec * 1000).toISOString().substring(11, 19);
+
+    const args = [
+      '--js-runtimes',
+      'node',
+      '--newline',
+      '--download-sections',
+      `*${startStr}-${endStr}`,
+      '-f',
+      'best[ext=mp4][height<=720]/best[height<=720]/18/best',
+      '--no-playlist',
+      '-o',
+      outputPath,
+      url,
+    ];
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
+      let stderr = '';
+      proc.stderr.on('data', (d) => (stderr += d.toString()));
+      proc.on('close', (code) => {
+        if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 10000) {
+          resolve();
+        } else {
+          reject(new Error(`Failed to download clip section: ${stderr.substring(0, 200)}`));
+        }
+      });
+      proc.on('error', (err) => reject(err));
+    });
+
+    return outputPath;
   },
 
   /**
