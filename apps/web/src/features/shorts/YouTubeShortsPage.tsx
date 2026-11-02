@@ -460,6 +460,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
     const formData = new FormData();
     formData.append('video', file);
+    formData.append('clipCount', String(clipCount));
+    formData.append('targetDuration', targetDuration);
 
     try {
       const res = await fetch(`${API_URL}/api/shorts/upload-local`, {
@@ -1140,42 +1142,55 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                   </button>
                 </div>
 
-                {/* Additional Generation Settings */}
-                <div className="flex items-center flex-wrap gap-4 text-xs pt-1 text-zinc-400">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider">
-                      Clip Count:
+                {/* Additional Generation Settings (Custom Clip Count & Duration) */}
+                <div className="flex items-center flex-wrap gap-3.5 text-xs pt-1 text-zinc-400">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-zinc-300 text-[11px] uppercase tracking-wider flex items-center gap-1">
+                      <span>Clip Count:</span>
                     </span>
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {[3, 6, 10, 15, 20].map((num) => (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[4, 10, 25, 50, 100].map((num) => (
                         <button
                           key={num}
                           type="button"
                           onClick={() => setClipCount(num)}
-                          className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-all ${
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition-all cursor-pointer ${
                             clipCount === num
-                              ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-sm shadow-rose-500/20'
-                              : 'bg-zinc-900 border-zinc-800 hover:bg-zinc-850 text-zinc-400'
+                              ? 'bg-rose-500 text-white border-rose-500 shadow-sm shadow-rose-500/30'
+                              : 'bg-zinc-900 border-zinc-800 hover:bg-zinc-850 text-zinc-300 hover:text-white'
                           }`}
                         >
                           {num}
                         </button>
                       ))}
-                      <div className="flex items-center gap-1 ml-1">
+                      
+                      {/* Direct Custom Number Input (Enter any number up to 150, e.g. 100) */}
+                      <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-950/80 border border-zinc-750 focus-within:border-rose-500 transition-all">
+                        <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Custom:</span>
                         <input
                           type="number"
                           min="1"
-                          max="25"
+                          max="150"
                           value={clipCount}
-                          onChange={(e) =>
-                            setClipCount(
-                              Math.max(1, Math.min(25, parseInt(e.target.value, 10) || 1))
-                            )
-                          }
-                          className="w-12 bg-zinc-900 border border-zinc-800 rounded px-1.5 py-1 text-[11px] text-center font-mono text-white focus:outline-none focus:border-rose-500"
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val)) {
+                              setClipCount(Math.max(1, Math.min(150, val)));
+                            } else if (e.target.value === '') {
+                              setClipCount(1);
+                            }
+                          }}
+                          className="w-14 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-xs text-center font-mono font-black text-rose-400 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                          title="Enter any number of shorts (1 to 150)"
                         />
-                        <span className="text-[10px] text-zinc-500 font-semibold">Clips</span>
+                        <span className="text-[10px] text-zinc-400 font-bold">Shorts</span>
                       </div>
+
+                      {clipCount >= 25 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold animate-in fade-in">
+                          🔥 {clipCount} Shorts Multi-Pack
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1193,7 +1208,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           key={item.id}
                           type="button"
                           onClick={() => setTargetDuration(item.id as any)}
-                          className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-all ${
+                          className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-all cursor-pointer ${
                             targetDuration === item.id
                               ? 'bg-rose-500/20 text-rose-400 border-rose-500/50'
                               : 'bg-zinc-900 border-zinc-800 hover:bg-zinc-850 text-zinc-400'
@@ -1208,27 +1223,73 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
               </form>
             ) : (
               /* Tab 2: Local Video Upload */
-              <div className="border-2 border-dashed border-zinc-800 hover:border-purple-500/50 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 bg-zinc-900/30 transition-all text-center">
-                <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
-                  <Upload size={22} />
+              <div className="flex flex-col gap-3">
+                <div className="border-2 border-dashed border-zinc-800 hover:border-purple-500/50 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 bg-zinc-900/30 transition-all text-center">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                    <Upload size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-200">
+                      Upload an MP4 or WebM video file
+                    </h3>
+                    <p className="text-[11px] text-zinc-500 mt-1">
+                      AI will automatically extract {clipCount} high-retention highlights and prepare vertical shorts
+                    </p>
+                  </div>
+                  <label className="cursor-pointer px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/20 active:scale-95">
+                    <span>Browse Video File</span>
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
-                <div>
-                  <h3 className="text-sm font-bold text-zinc-200">
-                    Upload an MP4 or WebM video file
-                  </h3>
-                  <p className="text-[11px] text-zinc-500 mt-1">
-                    AI will automatically extract high-retention highlights and prepare vertical shorts
-                  </p>
+
+                {/* Upload Tab Settings Bar */}
+                <div className="flex items-center flex-wrap gap-3.5 text-xs px-2 text-zinc-400">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-zinc-300 text-[11px] uppercase tracking-wider">
+                      Clip Count:
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[4, 10, 25, 50, 100].map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setClipCount(num)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition-all cursor-pointer ${
+                            clipCount === num
+                              ? 'bg-purple-600 text-white border-purple-500 shadow-sm shadow-purple-600/30'
+                              : 'bg-zinc-900 border-zinc-800 hover:bg-zinc-850 text-zinc-300 hover:text-white'
+                          }`}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                      <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-950/80 border border-zinc-750 focus-within:border-purple-500 transition-all">
+                        <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Custom:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="150"
+                          value={clipCount}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val)) {
+                              setClipCount(Math.max(1, Math.min(150, val)));
+                            } else if (e.target.value === '') {
+                              setClipCount(1);
+                            }
+                          }}
+                          className="w-14 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-xs text-center font-mono font-black text-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        />
+                        <span className="text-[10px] text-zinc-400 font-bold">Shorts</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <label className="cursor-pointer px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/20 active:scale-95">
-                  <span>Browse Video File</span>
-                  <input
-                    type="file"
-                    accept="video/mp4,video/webm"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
               </div>
             )}
 

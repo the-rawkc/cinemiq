@@ -660,7 +660,7 @@ ${transcriptText}`;
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed.clips) && parsed.clips.length > 0) {
-            return parsed.clips.map((c: any, index: number) => ({
+            const aiClips = parsed.clips.map((c: any, index: number) => ({
               id: `clip-${index + 1}-${Math.random().toString(36).substring(2, 6)}`,
               title: c.title || `Viral Highlight #${index + 1}`,
               startTime: Math.max(0, parseFloat(c.startTime) || 0),
@@ -672,6 +672,15 @@ ${transcriptText}`;
               suggestedHeadline: c.suggestedHeadline || c.title?.toUpperCase() || 'DON\'T MISS THIS ⚡',
               tags: Array.isArray(c.tags) ? c.tags : ['#shorts', '#viral'],
             }));
+
+            if (aiClips.length >= clipCount) {
+              return aiClips.slice(0, clipCount);
+            }
+
+            // Fill remainder with algorithmic timeline distribution
+            const algorithmicFill = this.generateAlgorithmicClips(info, transcript, clipCount, minLen, maxLen);
+            const combined = [...aiClips, ...algorithmicFill.slice(aiClips.length)];
+            return combined.slice(0, clipCount);
           }
         }
       } catch (err: any) {
@@ -686,7 +695,7 @@ ${transcriptText}`;
 
   /**
    * Algorithmic highlight detector: extracts optimal engaging segments across entire duration
-   * Specially calibrated for 10min to 60+ min videos generating up to 25 clips
+   * Specially calibrated for 10min to 60+ min videos generating up to 100+ clips
    */
   generateAlgorithmicClips(
     info: VideoInfo,
@@ -852,21 +861,24 @@ ${transcriptText}`;
       },
     ];
 
-    const safeCount = Math.max(1, Math.min(count, 25));
+    const safeCount = Math.max(1, Math.min(count, 150));
 
     // Calculate intelligent chronological distribution across the video duration
-    const startMargin = Math.min(20, totalDuration * 0.02);
-    const usableDuration = Math.max(30, totalDuration - startMargin - 30);
-    const intervalStep = usableDuration / safeCount;
+    const startMargin = Math.min(15, totalDuration * 0.02);
+    const usableDuration = Math.max(10, totalDuration - startMargin - minLen);
+    const intervalStep = safeCount > 1 ? usableDuration / (safeCount - 1) : 0;
 
     for (let i = 0; i < safeCount; i++) {
       const template = archetypes[i % archetypes.length];
-      const targetLength = Math.min(maxLen, Math.max(minLen, 26 + ((i * 7) % 24)));
+      const cycle = Math.floor(i / archetypes.length);
+      const partSuffix = cycle > 0 ? ` (Part ${cycle + 1})` : '';
+
+      const targetLength = Math.min(maxLen, Math.max(minLen, 24 + ((i * 5) % 25)));
 
       // Step along timeline
       let start = Math.round(startMargin + i * intervalStep);
       if (start + targetLength > totalDuration) {
-        start = Math.max(0, totalDuration - targetLength - 2);
+        start = Math.max(0, totalDuration - targetLength);
       }
       const end = Math.min(totalDuration, start + targetLength);
 
@@ -877,16 +889,18 @@ ${transcriptText}`;
         hook = `"${speechNearby[0].text}..."`;
       }
 
+      const baseTitle = info.title && info.title !== 'YouTube Video' ? info.title.substring(0, 32) : 'Highlight';
+
       clips.push({
         id: `clip-${i + 1}-${Math.random().toString(36).substring(2, 6)}`,
-        title: `${info.title.substring(0, 28)} - ${template.titleSuffix}`,
+        title: `${baseTitle} - ${template.titleSuffix}${partSuffix}`,
         startTime: Math.round(start * 10) / 10,
         endTime: Math.round(end * 10) / 10,
         duration: Math.round((end - start) * 10) / 10,
-        viralityScore: Math.max(82, template.score - Math.floor(i * 0.4)),
+        viralityScore: Math.max(78, template.score - Math.floor((i % archetypes.length) * 0.3) - (cycle * 2)),
         reason: template.reason,
         hook,
-        suggestedHeadline: template.headline,
+        suggestedHeadline: `${template.headline}${cycle > 0 ? ` #${i + 1}` : ''}`,
         tags: ['#shorts', '#viral', '#trending', '#highlights', '#podcast'],
       });
     }

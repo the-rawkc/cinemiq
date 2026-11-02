@@ -34,9 +34,10 @@ export const ShortsController = {
         return;
       }
 
+      const requestedClips = Math.max(1, Math.min(parseInt(clipCount, 10) || 4, 150));
       const jobId = await ShortsService.startAnalysisJob(
         url.trim(),
-        Math.max(1, Math.min(parseInt(clipCount, 10) || 4, 25)),
+        requestedClips,
         targetDuration
       );
 
@@ -261,8 +262,8 @@ export const ShortsController = {
       // Set job in map
       ShortsService.setJob(jobId, job);
 
-      // Probe duration if possible and generate clips
-      const requestedClips = Math.max(1, Math.min(parseInt(req.body.clipCount, 10) || 4, 25));
+      // Probe duration if possible and generate clips (supports up to 150 shorts)
+      const requestedClips = Math.max(1, Math.min(parseInt(req.body.clipCount, 10) || 4, 150));
       const clips = ShortsService.generateAlgorithmicClips(
         job.videoInfo,
         [],
