@@ -354,9 +354,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     return () => clearInterval(timer);
   }, [isFolderExporting, folderTargetPercent, exportedClips.length]);
 
-  // Poll Job Status if active
+  // Poll Job Status while active job is processing or stream is buffering
   useEffect(() => {
-    if (!activeJobId || !isAnalyzing) return;
+    if (!activeJobId) return;
+    if (job && (job.status === 'done' || job.status === 'failed')) return;
 
     const interval = setInterval(async () => {
       try {
@@ -367,13 +368,19 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
         if (data.success && data.job) {
           setJob(data.job);
-          if (data.job.status === 'done') {
+
+          // Once clips are generated, dismiss the full-screen loading lock immediately!
+          if (data.job.clips && data.job.clips.length > 0 && isAnalyzing) {
             setTargetProgress(100);
-            clearInterval(interval);
-            // Smooth grace period to allow progress bar to reach 100% and user to see completed state
             setTimeout(() => {
               setIsAnalyzing(false);
-            }, 650);
+            }, 300);
+          }
+
+          if (data.job.status === 'done') {
+            setTargetProgress(100);
+            setIsAnalyzing(false);
+            clearInterval(interval);
           } else if (data.job.status === 'failed') {
             setIsAnalyzing(false);
             setErrorMessage(data.job.error || 'Analysis failed. Please try a different video.');
@@ -389,10 +396,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       } catch (err: any) {
         console.error('Job polling error:', err);
       }
-    }, 450);
+    }, 400);
 
     return () => clearInterval(interval);
-  }, [activeJobId, isAnalyzing]);
+  }, [activeJobId, isAnalyzing, job?.status]);
 
   // Trigger YouTube Analysis
   const handleAnalyzeYouTube = async (e?: React.FormEvent) => {
@@ -606,7 +613,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
   // Download Single Clip directly from list card in 1 click with full title name
   const handleDownloadSingleClip = async (clip: ViralClip) => {
-    if (!job?.videoUrl) return;
+    if (!job?.videoUrl) {
+      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). It will be ready to download in moments!`);
+      return;
+    }
 
     setRenderingClipId(clip.id);
     try {
@@ -664,6 +674,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   // Single Click to Download ALL Clips at once in a ZIP bundle with full title names
   const handleDownloadAllZip = async () => {
     if (!job?.id || clips.length === 0) return;
+    if (!job?.videoUrl) {
+      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Bulk ZIP export will be available in moments!`);
+      return;
+    }
 
     setIsBatchRendering(true);
     setBatchDisplayPercent(0);
@@ -733,7 +747,11 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
   // Render & Download the Short via FFmpeg with smooth progress and full title name
   const handleRenderShort = async () => {
-    if (!activeClip || !job?.videoUrl) return;
+    if (!activeClip) return;
+    if (!job?.videoUrl) {
+      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Please wait a few seconds!`);
+      return;
+    }
 
     setIsRendering(true);
     setRenderDisplayPercent(0);
@@ -804,6 +822,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   // 1-Click Save Directly to a Folder on User's Computer with smooth progressive tracking
   const handleSaveDirectlyToFolder = async () => {
     if (!job?.id || clips.length === 0) return;
+    if (!job?.videoUrl) {
+      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Folder export will be available in moments!`);
+      return;
+    }
 
     setIsFolderExporting(true);
     setFolderDisplayPercent(0);
@@ -932,7 +954,11 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
   // Load into Cinemiq Multitrack Timeline Editor
   const handleSendToTimeline = () => {
-    if (!activeClip || !job?.videoUrl) return;
+    if (!activeClip) return;
+    if (!job?.videoUrl) {
+      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). It will open in Timeline Editor once buffering completes!`);
+      return;
+    }
 
     const videoFullUrl = `${API_URL}${job.videoUrl}`;
     const duration = Math.max(1, currentEnd - currentStart);
@@ -2156,6 +2182,41 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           </div>
                         </div>
                       </>
+                    ) : job?.videoInfo?.id && job.videoInfo.id !== 'unknown' ? (
+                      <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden">
+                        {/* Instant YouTube Stream Preview Trimmed to Start/End */}
+                        <iframe
+                          key={`yt-preview-${activeClip?.id || 'main'}-${Math.floor(currentStart)}`}
+                          src={`https://www.youtube-nocookie.com/embed/${job.videoInfo.id}?start=${Math.floor(currentStart)}&end=${Math.ceil(currentEnd)}&autoplay=1&controls=0&rel=0&modestbranding=1&loop=1`}
+                          title={activeClip?.title || 'YouTube Short Preview'}
+                          className="w-full h-full object-cover pointer-events-auto"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        />
+
+                        {/* Simulated Top Headline Banner */}
+                        {currentHeadline && (
+                          <div className="absolute top-8 left-3 right-3 z-20 pointer-events-none">
+                            <div className="bg-black/75 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-1.5 text-center shadow-lg">
+                              <span className="text-[10px] font-black tracking-wide text-white uppercase drop-shadow">
+                                {currentHeadline}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Stream sync overlay badge at bottom */}
+                        <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 pointer-events-none bg-zinc-950/85 backdrop-blur-md rounded-xl p-2 border border-zinc-800 flex items-center justify-between text-[10px]">
+                          <span className="text-zinc-300 font-medium flex items-center gap-1.5">
+                            <RefreshCw size={11} className="animate-spin text-rose-400" />
+                            <span>Buffering HD stream for export...</span>
+                          </span>
+                          <span className="font-mono text-amber-300 font-bold">
+                            {job?.downloadProgress?.percent ? `${Math.round(job.downloadProgress.percent)}%` : `${Math.round(displayProgress)}%`}
+                            {job?.downloadProgress?.speed ? ` • ${job.downloadProgress.speed}` : ''}
+                          </span>
+                        </div>
+                      </div>
                     ) : (
                       <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-zinc-950 text-center gap-2.5">
                         <RefreshCw size={24} className="animate-spin text-rose-400" />

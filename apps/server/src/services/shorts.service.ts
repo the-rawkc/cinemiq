@@ -163,11 +163,38 @@ function parseVTTFile(filePath: string): Array<{ start: number; end: number; tex
   return segments.filter((s) => s.text.length > 0);
 }
 
+function extractYouTubeId(url: string): string | null {
+  try {
+    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/|watch\?.+&v=))([\w-]{11})/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 export const ShortsService = {
   /**
    * Fetch YouTube metadata without downloading video stream
    */
   async getVideoInfo(url: string): Promise<VideoInfo> {
+    const ytId = extractYouTubeId(url);
+    const uploadsDir = getUploadsDir();
+
+    // Instant local metadata cache check
+    if (ytId) {
+      const infoPath = path.join(uploadsDir, `yt-${ytId}.info.json`);
+      if (fs.existsSync(infoPath)) {
+        try {
+          const raw = fs.readFileSync(infoPath, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.title) {
+            console.log(`⚡ [Shorts] Instant metadata cache hit: ${parsed.title}`);
+            return parsed;
+          }
+        } catch {}
+      }
+    }
+
     return new Promise((resolve, reject) => {
       const args = [
         '--js-runtimes',
@@ -175,6 +202,7 @@ export const ShortsService = {
         '--dump-single-json',
         '--no-playlist',
         '--skip-download',
+        '--no-warnings',
         '--extractor-args',
         'youtube:player_client=android,web',
         '--retry-sleep',
@@ -207,7 +235,7 @@ export const ShortsService = {
         try {
           const json = JSON.parse(stdout);
           const info: VideoInfo = {
-            id: json.id || 'unknown',
+            id: json.id || ytId || 'unknown',
             title: json.title || 'Untitled YouTube Video',
             duration: Math.round(json.duration || 0),
             thumbnail: json.thumbnail || (json.thumbnails && json.thumbnails[0]?.url) || '',
@@ -218,6 +246,15 @@ export const ShortsService = {
             tags: Array.isArray(json.tags) ? json.tags : [],
             categories: Array.isArray(json.categories) ? json.categories : [],
           };
+
+          // Save info cache to disk for instant future lookups
+          const sanitized = (info.id || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+          if (sanitized) {
+            try {
+              fs.writeFileSync(path.join(uploadsDir, `yt-${sanitized}.info.json`), JSON.stringify(info, null, 2));
+            } catch {}
+          }
+
           resolve(info);
         } catch (err: any) {
           reject(new Error(`Failed to parse YouTube metadata JSON: ${err.message}`));
@@ -454,7 +491,7 @@ export const ShortsService = {
 
     // 3. Fast progressive stream download with parallel connections & direct write
     job.status = 'downloading';
-    job.stage = 'Highlights identified! Accelerating stream for preview...';
+    job.stage = 'Clips ready! Caching high-speed stream for preview & export...';
     job.progress = 50;
     job.downloadStartTime = Date.now();
 
@@ -465,12 +502,14 @@ export const ShortsService = {
         'node',
         '--newline',
         '-N',
-        '4',
+        '8',
         '--no-part',
         '--buffer-size',
-        '64K',
+        '2M',
+        '--concurrent-fragments',
+        '8',
         '-f',
-        'best[height<=720][fps<=30][ext=mp4]/best[height<=720]/bestvideo[height<=720]+bestaudio/best[height<=480]/18/best',
+        'best[ext=mp4][height<=720]/best[height<=720]/18/bestvideo[height<=720]+bestaudio/best',
         '--merge-output-format',
         'mp4',
         '--no-playlist',
