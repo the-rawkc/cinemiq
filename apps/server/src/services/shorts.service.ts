@@ -46,6 +46,13 @@ export interface ViralClip {
   suggestedHeadline: string;
   tags: string[];
   transcriptSegments?: TranscriptSegment[];
+  pacing?: string;
+  engagementType?: string;
+  wordCount?: number;
+  speechTempo?: string;
+  recommendedDescription?: string;
+  titleVariants?: string[];
+  keyTopics?: string[];
 }
 
 export interface DownloadProgress {
@@ -627,7 +634,41 @@ export const ShortsService = {
   generateHashtags(info: VideoInfo): string[] {
     const rawTags: string[] = [];
 
-    // 1. Existing tags from metadata
+    // 1. Channel name as tag
+    if (info.channel) {
+      const channelTag = info.channel.replace(/[^a-zA-Z0-9]/g, '');
+      if (channelTag && channelTag.length > 2) {
+        rawTags.push(`#${channelTag}`);
+        rawTags.push(`#${channelTag}Shorts`);
+      }
+    }
+
+    // 2. Significant title keywords and topic hashtags
+    if (info.title) {
+      // Full title condensed hashtag
+      const condensedTitle = info.title.replace(/[^a-zA-Z0-9]/g, '');
+      if (condensedTitle.length >= 4 && condensedTitle.length <= 25) {
+        rawTags.push(`#${condensedTitle}`);
+      }
+
+      // Title individual keywords
+      const titleWords = info.title
+        .replace(/[^\w\s]/gi, ' ')
+        .split(/\s+/)
+        .filter(
+          (w) =>
+            w.length >= 3 &&
+            !['with', 'from', 'this', 'that', 'what', 'when', 'where', 'have', 'been', 'about', 'and', 'the', 'for'].includes(
+              w.toLowerCase()
+            )
+        );
+
+      for (const word of titleWords.slice(0, 10)) {
+        rawTags.push(`#${word.charAt(0).toUpperCase() + word.slice(1)}`);
+      }
+    }
+
+    // 3. Existing tags from metadata
     if (info.tags && Array.isArray(info.tags)) {
       for (const t of info.tags) {
         if (typeof t === 'string' && t.trim()) {
@@ -639,48 +680,66 @@ export const ShortsService = {
       }
     }
 
-    // 2. Channel name as tag
-    if (info.channel) {
-      const channelTag = info.channel.replace(/[^a-zA-Z0-9]/g, '');
-      if (channelTag && channelTag.length > 2) {
-        rawTags.push(`#${channelTag}`);
-      }
-    }
-
-    // 3. Significant title keywords
-    if (info.title) {
-      const titleWords = info.title
-        .replace(/[^\w\s]/gi, ' ')
-        .split(/\s+/)
-        .filter(
-          (w) =>
-            w.length >= 4 &&
-            !['with', 'from', 'this', 'that', 'what', 'when', 'where', 'have', 'been', 'about'].includes(
-              w.toLowerCase()
-            )
-        );
-
-      for (const word of titleWords.slice(0, 5)) {
-        rawTags.push(`#${word.charAt(0).toUpperCase() + word.slice(1)}`);
-      }
-    }
-
-    // 4. Guaranteed high-traffic viral discovery tags
-    const viralEssentials = [
+    // 4. Guaranteed high-traffic viral discovery tags for YouTube Shorts
+    const ytShortsTags = [
       '#shorts',
-      '#viral',
-      '#trending',
-      '#fyp',
-      '#foryou',
-      '#reels',
-      '#explore',
       '#ytshorts',
-      '#entertainment',
-      '#comedy',
-      '#podcast',
+      '#youtubeshorts',
+      '#shortsfeed',
+      '#viralshorts',
+      '#shortsvideo',
+      '#trendingshorts',
+      '#shortsclip',
+      '#shortsanity',
     ];
 
-    for (const v of viralEssentials) {
+    // 5. High-traffic Instagram Reels algorithm tags
+    const instaReelsTags = [
+      '#reels',
+      '#reelsinstagram',
+      '#reelsvideo',
+      '#viralreels',
+      '#trendingreels',
+      '#instareels',
+      '#explorepage',
+      '#reelitfeelit',
+      '#reelsindia',
+    ];
+
+    // 6. High-traffic TikTok ForYou algorithm tags
+    const tiktokTags = [
+      '#fyp',
+      '#foryou',
+      '#foryoupage',
+      '#viral',
+      '#trending',
+      '#tiktokviral',
+      '#xyzbca',
+      '#blowthisup',
+      '#fypage',
+    ];
+
+    // 7. Audience reaction, comedy & entertainment tags
+    const engagementTags = [
+      '#comedy',
+      '#podcast',
+      '#podcastclips',
+      '#reaction',
+      '#mindblown',
+      '#mustwatch',
+      '#storytime',
+      '#entertainment',
+      '#hilarious',
+      '#interview',
+      '#unfiltered',
+      '#relatable',
+      '#epicmoments',
+      '#funnymoments',
+      '#clips',
+      '#cinemiq',
+    ];
+
+    for (const v of [...ytShortsTags, ...instaReelsTags, ...tiktokTags, ...engagementTags]) {
       rawTags.push(v);
     }
 
@@ -695,7 +754,7 @@ export const ShortsService = {
       }
     }
 
-    return uniqueTags.slice(0, 25);
+    return uniqueTags.slice(0, 60);
   },
 
   /**
@@ -1158,19 +1217,79 @@ ${transcriptText}`;
               const start = Math.max(0, parseFloat(c.startTime) || 0);
               const end = Math.min(duration, parseFloat(c.endTime) || minLen);
               const clipSegs = transcript.filter((s) => s.end > start && s.start < end);
+              const clipDur = Math.max(10, end - start);
+
+              // Speech metrics & pacing analysis
+              const textContent = clipSegs.map((s) => s.text).join(' ');
+              const words = textContent.split(/\s+/).filter(Boolean);
+              const wordCount = words.length;
+              const wpm = clipDur > 0 ? Math.round((wordCount / clipDur) * 60) : 135;
+              const pacing =
+                wpm >= 170
+                  ? '⚡ Hyper-Fast & Punchy'
+                  : wpm >= 140
+                  ? '🔥 Fast & Dynamic'
+                  : wpm >= 110
+                  ? '🎯 Balanced & Engaging'
+                  : '🧘 Dramatic & Deliberate';
+
+              const engagementArchetypes = [
+                '💬 High Debate / Comment Magnet',
+                '🤯 Mind-Bending Revelation',
+                '😂 Extreme Humor / Share Trigger',
+                '👀 Curiosity Cliffhanger',
+                '💡 Save & Bookmark Worthy',
+                '🔥 Viral Hook Retention Peak',
+              ];
+              const engagementType = engagementArchetypes[index % engagementArchetypes.length];
+
+              const hookQuote = c.hook || (clipSegs[0]?.text ? `"${clipSegs[0].text}..."` : 'Opening hook from speech');
+              const headline = c.suggestedHeadline || c.title?.toUpperCase() || "DON'T MISS THIS ⚡";
+
+              const rawKeywords = words
+                .map((w) => w.replace(/[^a-zA-Z]/g, ''))
+                .filter((w) => w.length >= 4 && !['this', 'that', 'with', 'from', 'have', 'were', 'what', 'then'].includes(w.toLowerCase()));
+              const keyTopics = Array.from(new Set(rawKeywords)).slice(0, 5);
+
+              const titleVariants = [
+                c.title || `Viral Highlight #${index + 1}`,
+                headline,
+                `Wait till you hear this part... 😱`,
+              ];
+
+              const channelTag = (info.channel || 'creator').replace(/[^a-zA-Z0-9]/g, '');
+              const recommendedDescription = `🚨 Watch till the end: ${c.reason || 'This moment had everyone talking.'}\n\n"${hookQuote}"\n\n👇 What do you think about this? Let us know in the comments!\n\n#shorts #${channelTag} #viral #trending #reels #fyp`;
 
               return {
                 id: `clip-${index + 1}-${Math.random().toString(36).substring(2, 6)}`,
                 title: c.title || `Viral Highlight #${index + 1}`,
                 startTime: Math.round(start * 10) / 10,
                 endTime: Math.round(end * 10) / 10,
-                duration: Math.round(Math.max(10, end - start) * 10) / 10,
+                duration: Math.round(clipDur * 10) / 10,
                 viralityScore: c.viralityScore || Math.floor(88 + Math.random() * 10),
                 reason: c.reason || 'High emotional hook and retention curve.',
-                hook: c.hook || (clipSegs[0]?.text ? `"${clipSegs[0].text}..."` : 'Opening hook from speech'),
-                suggestedHeadline: c.suggestedHeadline || c.title?.toUpperCase() || "DON'T MISS THIS ⚡",
-                tags: Array.isArray(c.tags) ? c.tags : ['#shorts', '#viral'],
+                hook: hookQuote,
+                suggestedHeadline: headline,
+                tags: Array.isArray(c.tags) && c.tags.length >= 8 ? c.tags : [
+                  '#shorts',
+                  '#viral',
+                  '#trending',
+                  '#reels',
+                  '#fyp',
+                  '#foryou',
+                  ...(channelTag ? [`#${channelTag}`] : []),
+                  ...keyTopics.map((k) => `#${k}`),
+                  '#explore',
+                  '#mustwatch',
+                ],
                 transcriptSegments: clipSegs,
+                pacing,
+                engagementType,
+                wordCount,
+                speechTempo: `${wpm} WPM`,
+                recommendedDescription,
+                titleVariants,
+                keyTopics: keyTopics.length > 0 ? keyTopics : ['Viral', 'Moments', 'Trending'],
               };
             });
 
@@ -1454,19 +1573,92 @@ ${transcriptText}`;
       }
 
       const baseTitle = info.title && info.title !== 'YouTube Video' ? info.title.substring(0, 32) : 'Highlight';
+      const clipDur = Math.max(5, snappedEnd - snappedStart);
+
+      // Speech metrics & pacing analysis
+      const fullText = clipSegments.map((s) => s.text).join(' ');
+      const words = fullText.split(/\s+/).filter(Boolean);
+      const wordCount = words.length;
+      const wpm = clipDur > 0 ? Math.round((wordCount / clipDur) * 60) : 135;
+      const pacing =
+        wpm >= 170
+          ? '⚡ Hyper-Fast & Punchy'
+          : wpm >= 140
+          ? '🔥 Fast & Dynamic'
+          : wpm >= 105
+          ? '🎯 Balanced & Engaging'
+          : '🧘 Dramatic & Deliberate';
+
+      const engagementTypes = [
+        '💬 High Debate / Comment Magnet',
+        '🤯 Mind-Bending Revelation',
+        '😂 Extreme Humor / Share Trigger',
+        '👀 Curiosity Cliffhanger',
+        '💡 Save & Bookmark Worthy',
+        '🔥 Viral Hook Retention Peak',
+        '⚡ High-Pace Punchline Payoff',
+        '🚨 Jaw-Dropping Reality Check',
+      ];
+      const engagementType = engagementTypes[i % engagementTypes.length];
+
+      // Clean topic keywords from speech & title
+      const rawTopics = words
+        .map((w) => w.replace(/[^a-zA-Z]/g, ''))
+        .filter(
+          (w) =>
+            w.length >= 4 &&
+            !['with', 'from', 'this', 'that', 'what', 'when', 'where', 'have', 'been', 'about', 'just', 'there', 'their'].includes(
+              w.toLowerCase()
+            )
+        );
+      const keyTopics = Array.from(new Set(rawTopics)).slice(0, 5);
+
+      // 3 Title Variants for A/B testing
+      const titleVariants = [
+        `${baseTitle} - ${template.titleSuffix}${partSuffix}`,
+        `${template.headline}${cycle > 0 ? ` #${i + 1}` : ''}`,
+        `Did they actually say this?! 😱 ${partSuffix}`.trim(),
+      ];
+
+      // Platform ready description
+      const channelTag = (info.channel || 'creator').replace(/[^a-zA-Z0-9]/g, '');
+      const recommendedDescription = `🚨 ${template.headline}\n\n"${hook}"\n\n📌 Breakdown: ${template.reason}\n\n👇 Drop your thoughts below!\n\n#shorts #${channelTag} #viral #trending #reels #fyp #mindblown #podcast`;
+
+      // 12-16 tailored tags per clip
+      const clipTags = [
+        '#shorts',
+        '#viral',
+        '#trending',
+        '#reels',
+        '#fyp',
+        '#foryou',
+        `#${template.titleSuffix.replace(/[^a-zA-Z0-9]/g, '')}`,
+        ...(channelTag ? [`#${channelTag}`] : []),
+        ...keyTopics.map((k) => `#${k}`),
+        '#cinemiq',
+        '#explorepage',
+        '#mustwatch',
+      ].filter((t, idx, arr) => t.length > 2 && arr.indexOf(t) === idx);
 
       clips.push({
         id: `clip-${i + 1}-${Math.random().toString(36).substring(2, 6)}`,
         title: `${baseTitle} - ${template.titleSuffix}${partSuffix}`,
         startTime: Math.round(snappedStart * 10) / 10,
         endTime: Math.round(snappedEnd * 10) / 10,
-        duration: Math.round((snappedEnd - snappedStart) * 10) / 10,
+        duration: Math.round(clipDur * 10) / 10,
         viralityScore: Math.max(78, template.score - Math.floor((i % archetypes.length) * 0.3) - (cycle * 2)),
         reason: template.reason,
         hook,
         suggestedHeadline: `${template.headline}${cycle > 0 ? ` #${i + 1}` : ''}`,
-        tags: ['#shorts', '#viral', '#trending', '#highlights', '#podcast'],
+        tags: clipTags,
         transcriptSegments: clipSegments,
+        pacing,
+        engagementType,
+        wordCount,
+        speechTempo: `${wpm} WPM`,
+        recommendedDescription,
+        titleVariants,
+        keyTopics: keyTopics.length > 0 ? keyTopics : ['Trending', 'Highlights', 'Viral'],
       });
     }
 
@@ -2042,11 +2234,15 @@ ${transcriptText}`;
         const exported = exportedClips[idx];
         return [
           `#${idx + 1}: ${exported?.filename || c.title}`,
-          `Virality Score: ${c.viralityScore}% | Hook: ${c.hook}`,
+          `Virality Score: ${c.viralityScore}% | Pacing: ${c.pacing || 'Fast & Dynamic'} | Trigger: ${c.engagementType || 'High Retention'}`,
+          `Speech Metrics: ${c.speechTempo || '140 WPM'} (${c.wordCount || 60} words) | Hook: ${c.hook}`,
           `Duration: ${Math.round(c.duration)}s (${c.startTime}s - ${c.endTime}s)`,
           `Headline Overlay: ${params.customHeadlines?.[c.id] || c.suggestedHeadline}`,
+          `Key Topics: ${(c.keyTopics || []).join(', ')}`,
+          `Ready-to-Post Description:\n${c.recommendedDescription || ''}`,
+          `Title Variants:\n${(c.titleVariants || []).map((t, tIdx) => `  ${tIdx + 1}. ${t}`).join('\n')}`,
           `Tags: ${(c.tags || []).join(' ')}`,
-          '',
+          '------------------------------------------------',
         ].join('\n');
       }),
     ];

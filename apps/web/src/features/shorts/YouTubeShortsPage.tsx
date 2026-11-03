@@ -27,7 +27,13 @@ import {
   FolderOpen,
   Hash,
   Music,
-  Sparkles
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Tag,
+  Activity,
+  Share2
 } from 'lucide-react';
 import { API_URL } from '../../config';
 
@@ -85,6 +91,13 @@ interface ViralClip {
   suggestedHeadline: string;
   tags: string[];
   transcriptSegments?: TranscriptSegment[];
+  pacing?: string;
+  engagementType?: string;
+  wordCount?: number;
+  speechTempo?: string;
+  recommendedDescription?: string;
+  titleVariants?: string[];
+  keyTopics?: string[];
 }
 
 interface DownloadProgress {
@@ -207,6 +220,12 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [customHeadlines, setCustomHeadlines] = useState<Record<string, string>>({});
   const [clipTrims, setClipTrims] = useState<Record<string, { start: number; end: number }>>({});
   const [copiedAllHashtags, setCopiedAllHashtags] = useState(false);
+  const [copiedYTStudio, setCopiedYTStudio] = useState(false);
+  const [copiedInsta, setCopiedInsta] = useState(false);
+  const [copiedTikTok, setCopiedTikTok] = useState(false);
+  const [copiedDescription, setCopiedDescription] = useState(false);
+  const [showAllHashtags, setShowAllHashtags] = useState(false);
+  const [selectedTagCategory, setSelectedTagCategory] = useState<'all' | 'youtube' | 'reels' | 'tiktok' | 'topics'>('all');
   const [copiedTagText, setCopiedTagText] = useState<string | null>(null);
   const [mobileViewTab, setMobileViewTab] = useState<'clips' | 'preview'>('clips');
 
@@ -785,6 +804,74 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     navigator.clipboard.writeText(formatted);
     setCopiedAllHashtags(true);
     setTimeout(() => setCopiedAllHashtags(false), 2500);
+  };
+
+  const handleCopyYTStudioTags = () => {
+    const tagsList =
+      job?.hashtags && job.hashtags.length > 0
+        ? job.hashtags
+        : activeClip?.tags || ['shorts', 'viral', 'trending', 'reels'];
+    const commaSeparated = tagsList
+      .map((t) => t.replace(/^#/, '').trim())
+      .filter(Boolean)
+      .join(', ');
+    navigator.clipboard.writeText(commaSeparated);
+    setCopiedYTStudio(true);
+    setTimeout(() => setCopiedYTStudio(false), 2500);
+  };
+
+  const handleCopyInstaTags = () => {
+    const tagsList =
+      job?.hashtags && job.hashtags.length > 0
+        ? job.hashtags
+        : activeClip?.tags || ['#shorts', '#viral', '#trending', '#reels'];
+    const reelsTags = tagsList.filter((t) => {
+      const l = t.toLowerCase();
+      return (
+        l.includes('reel') ||
+        l.includes('insta') ||
+        l.includes('explore') ||
+        l.includes('viral') ||
+        l.includes('trending') ||
+        l.includes('fyp')
+      );
+    });
+    const finalTags = reelsTags.length >= 8 ? reelsTags : tagsList.slice(0, 30);
+    navigator.clipboard.writeText(finalTags.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' '));
+    setCopiedInsta(true);
+    setTimeout(() => setCopiedInsta(false), 2500);
+  };
+
+  const handleCopyTikTokTags = () => {
+    const tagsList =
+      job?.hashtags && job.hashtags.length > 0
+        ? job.hashtags
+        : activeClip?.tags || ['#shorts', '#viral', '#trending', '#fyp'];
+    const tiktokTags = tagsList.filter((t) => {
+      const l = t.toLowerCase();
+      return (
+        l.includes('tiktok') ||
+        l.includes('fyp') ||
+        l.includes('foryou') ||
+        l.includes('xyzbca') ||
+        l.includes('viral') ||
+        l.includes('blowthisup')
+      );
+    });
+    const finalTags = tiktokTags.length >= 6 ? tiktokTags : tagsList.slice(0, 20);
+    navigator.clipboard.writeText(finalTags.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' '));
+    setCopiedTikTok(true);
+    setTimeout(() => setCopiedTikTok(false), 2500);
+  };
+
+  const handleCopyClipDescription = (descriptionText?: string) => {
+    const textToCopy =
+      descriptionText ||
+      activeClip?.recommendedDescription ||
+      `🚨 ${activeClip?.suggestedHeadline || activeClip?.title}\n\n"${activeClip?.hook}"\n\n👇 Drop your thoughts below!\n\n#shorts #viral #reels #fyp`;
+    navigator.clipboard.writeText(textToCopy);
+    setCopiedDescription(true);
+    setTimeout(() => setCopiedDescription(false), 2500);
   };
 
   const handleCopySingleTag = (tag: string) => {
@@ -1727,68 +1814,177 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                 </div>
               </div>
 
-              {/* Viral Upload Hashtags & Description Kit */}
-              {((job.hashtags && job.hashtags.length > 0) || (activeClip?.tags && activeClip.tags.length > 0)) && (
-                <div className="p-3 rounded-xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-rose-500/25 flex flex-col gap-2 shadow-md shadow-rose-950/15">
-                  <div className="flex items-center justify-between gap-2.5 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <div className="w-5 h-5 rounded-md bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-                        <Hash size={12} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] font-black uppercase tracking-wider text-rose-300">
-                            Viral Shorts & Reels Hashtags
-                          </span>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 font-bold border border-rose-500/30">
-                            SEO Optimized
-                          </span>
+              {/* Viral Upload Hashtags & Description Kit (50+ Multi-Platform Tags) */}
+              {((job.hashtags && job.hashtags.length > 0) || (activeClip?.tags && activeClip.tags.length > 0)) && (() => {
+                const allAvailableTags = (job.hashtags && job.hashtags.length > 0 ? job.hashtags : (activeClip?.tags || []))
+                  .map((t) => (t.startsWith('#') ? t : `#${t}`));
+
+                const ytTags = allAvailableTags.filter((t) => {
+                  const l = t.toLowerCase();
+                  return l.includes('short') || l.includes('yt');
+                });
+                const instaTags = allAvailableTags.filter((t) => {
+                  const l = t.toLowerCase();
+                  return l.includes('reel') || l.includes('insta') || l.includes('explore');
+                });
+                const ttTags = allAvailableTags.filter((t) => {
+                  const l = t.toLowerCase();
+                  return l.includes('tiktok') || l.includes('fyp') || l.includes('foryou') || l.includes('blowthisup') || l.includes('xyzbca');
+                });
+                const topicTags = allAvailableTags.filter(
+                  (t) => !ytTags.includes(t) && !instaTags.includes(t) && !ttTags.includes(t)
+                );
+
+                const displayedTags =
+                  selectedTagCategory === 'youtube'
+                    ? ytTags
+                    : selectedTagCategory === 'reels'
+                    ? instaTags
+                    : selectedTagCategory === 'tiktok'
+                    ? ttTags
+                    : selectedTagCategory === 'topics'
+                    ? topicTags
+                    : allAvailableTags;
+
+                const visibleTags = showAllHashtags ? displayedTags : displayedTags.slice(0, 28);
+
+                return (
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border border-rose-500/30 flex flex-col gap-3 shadow-lg shadow-rose-950/20">
+                    {/* Header Row: Title, Badges & 1-Click Platform Copy Buttons */}
+                    <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-rose-500/20 to-pink-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center shrink-0 shadow-inner">
+                          <Hash size={16} />
                         </div>
-                        <p className="text-[9.5px] text-zinc-400">
-                          Use these trending tags when uploading any of your shorts to YouTube, Instagram Reels, or TikTok.
-                        </p>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black uppercase tracking-wider text-white">
+                              Viral Multi-Platform Hashtags Kit
+                            </span>
+                            <span className="text-[9.5px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40">
+                              {allAvailableTags.length}+ Tags Ready
+                            </span>
+                            <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold border border-amber-500/30">
+                              SEO Algorithm Ranked
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-zinc-400 mt-0.5">
+                            High-velocity discovery tags ranked for YouTube Shorts feed, Instagram Reels explore, & TikTok FYP.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 1-Click Fast Copy Action Bar */}
+                      <div className="flex flex-wrap items-center gap-1.5 w-full xl:w-auto">
+                        {/* Copy All */}
+                        <button
+                          type="button"
+                          onClick={handleCopyAllHashtags}
+                          className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 active:scale-95 text-white font-bold text-[10.5px] flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-rose-600/30"
+                          title="Copy all 50+ hashtags to clipboard"
+                        >
+                          {copiedAllHashtags ? <Check size={12} className="text-white" /> : <Copy size={12} />}
+                          <span>{copiedAllHashtags ? 'Copied All (50+)!' : `Copy All (${allAvailableTags.length})`}</span>
+                        </button>
+
+                        {/* YouTube Studio Tags (Comma-Separated for Tag Input) */}
+                        <button
+                          type="button"
+                          onClick={handleCopyYTStudioTags}
+                          className="px-2 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 active:scale-95 text-zinc-200 hover:text-white border border-zinc-750 hover:border-red-500/40 font-bold text-[10.5px] flex items-center gap-1.5 transition-all cursor-pointer"
+                          title="Copy comma-separated tags ready to paste into YouTube Studio upload box"
+                        >
+                          {copiedYTStudio ? <Check size={12} className="text-red-400" /> : <Tag size={12} className="text-red-400" />}
+                          <span>{copiedYTStudio ? 'Copied Studio Tags!' : '🔴 YouTube Studio'}</span>
+                        </button>
+
+                        {/* Instagram Reels Tags */}
+                        <button
+                          type="button"
+                          onClick={handleCopyInstaTags}
+                          className="px-2 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 active:scale-95 text-zinc-200 hover:text-white border border-zinc-750 hover:border-pink-500/40 font-bold text-[10.5px] flex items-center gap-1.5 transition-all cursor-pointer"
+                          title="Copy Instagram Reels trending hashtag pack"
+                        >
+                          {copiedInsta ? <Check size={12} className="text-pink-400" /> : <Share2 size={12} className="text-pink-400" />}
+                          <span>{copiedInsta ? 'Copied Reels Set!' : '📸 Reels Pack'}</span>
+                        </button>
+
+                        {/* TikTok FYP Tags */}
+                        <button
+                          type="button"
+                          onClick={handleCopyTikTokTags}
+                          className="px-2 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 active:scale-95 text-zinc-200 hover:text-white border border-zinc-750 hover:border-cyan-500/40 font-bold text-[10.5px] flex items-center gap-1.5 transition-all cursor-pointer"
+                          title="Copy TikTok viral FYP hashtag pack"
+                        >
+                          {copiedTikTok ? <Check size={12} className="text-cyan-400" /> : <Flame size={12} className="text-cyan-400" />}
+                          <span>{copiedTikTok ? 'Copied TikTok Set!' : '🎵 TikTok FYP'}</span>
+                        </button>
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleCopyAllHashtags}
-                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 active:scale-95 text-white font-bold text-[10.5px] flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-rose-600/30 shrink-0"
-                    >
-                      {copiedAllHashtags ? (
-                        <>
-                          <Check size={11} className="text-white" />
-                          <span>Copied All Hashtags!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={11} />
-                          <span>Copy All Hashtags (1-Click)</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                    {/* Platform Filter Tabs */}
+                    <div className="flex items-center gap-1.5 border-b border-zinc-850 pb-2 text-[10px] overflow-x-auto">
+                      <span className="text-zinc-500 uppercase font-black text-[9px] tracking-wider mr-1">Filter:</span>
+                      {[
+                        { id: 'all', label: `All (${allAvailableTags.length})` },
+                        { id: 'youtube', label: `🔴 YouTube (${ytTags.length})` },
+                        { id: 'reels', label: `📸 Reels (${instaTags.length})` },
+                        { id: 'tiktok', label: `🎵 TikTok (${ttTags.length})` },
+                        { id: 'topics', label: `💡 Topics (${topicTags.length})` },
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setSelectedTagCategory(tab.id as any)}
+                          className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                            selectedTagCategory === tab.id
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50 shadow-sm'
+                              : 'bg-zinc-900/80 hover:bg-zinc-850 text-zinc-400 hover:text-zinc-200 border border-zinc-850'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
 
-                  {/* Hashtag Chips Grid */}
-                  <div className="flex flex-wrap items-center gap-1 pt-0.5 max-h-20 overflow-y-auto">
-                    {(job.hashtags && job.hashtags.length > 0 ? job.hashtags : (activeClip?.tags || [])).map((tag, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleCopySingleTag(tag)}
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono transition-all cursor-pointer border ${
-                          copiedTagText === (tag.startsWith('#') ? tag : `#${tag}`)
-                            ? 'bg-rose-500 text-white border-rose-400'
-                            : 'bg-zinc-900/90 hover:bg-zinc-800 border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-white'
-                        }`}
-                        title="Click to copy single hashtag"
-                      >
-                        {tag.startsWith('#') ? tag : `#${tag}`}
-                      </button>
-                    ))}
+                    {/* Interactive Hashtag Chips Grid with 1-Click Copy */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {visibleTags.map((tag, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleCopySingleTag(tag)}
+                          className={`px-2.5 py-1 rounded-lg text-[10.5px] font-mono transition-all cursor-pointer border ${
+                            copiedTagText === tag
+                              ? 'bg-rose-500 text-white border-rose-400 shadow-md scale-105'
+                              : 'bg-zinc-900/90 hover:bg-zinc-850 border-zinc-800 hover:border-rose-500/50 text-zinc-300 hover:text-white'
+                          }`}
+                          title="Click to copy this hashtag"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Expand / Collapse All 50+ Tags Toggle */}
+                    {displayedTags.length > 28 && (
+                      <div className="flex items-center justify-between pt-1 border-t border-zinc-850/80">
+                        <span className="text-[10px] text-zinc-500">
+                          Showing {visibleTags.length} of {displayedTags.length} tags in this filter
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllHashtags(!showAllHashtags)}
+                          className="flex items-center gap-1 text-[10.5px] font-bold text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
+                        >
+                          <span>{showAllHashtags ? 'Show Less (Compact View)' : `View All ${displayedTags.length} Tags`}</span>
+                          {showAllHashtags ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Batch Export All Clips Hero Banner with Direct Folder & ZIP */}
               <div className="p-3 sm:p-3.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-zinc-900 to-indigo-950/60 border border-blue-500/35 flex flex-col gap-2.5 shadow-lg shadow-blue-950/30">
@@ -2090,6 +2286,36 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         </div>
                       </div>
 
+                      {/* Enriched Clip Details: Pacing, Engagement Trigger & Speech Metrics */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        {clip.pacing && (
+                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 font-semibold flex items-center gap-1">
+                            <span>{clip.pacing}</span>
+                          </span>
+                        )}
+                        {clip.engagementType && (
+                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/25 text-purple-300 font-semibold flex items-center gap-1">
+                            <span>{clip.engagementType}</span>
+                          </span>
+                        )}
+                        {clip.speechTempo && (
+                          <span className="text-[9px] px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/25 text-blue-300 font-mono font-medium flex items-center gap-1">
+                            <Activity size={9} />
+                            <span>{clip.speechTempo}</span>
+                            {clip.wordCount ? <span className="text-zinc-500">({clip.wordCount}w)</span> : null}
+                          </span>
+                        )}
+                        {clip.keyTopics && clip.keyTopics.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            {clip.keyTopics.slice(0, 3).map((kw, kwIdx) => (
+                              <span key={kwIdx} className="text-[8.5px] px-1.5 py-0.2 rounded bg-zinc-850 text-zinc-400 font-mono">
+                                #{kw}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
                       {/* If Selected: Show Fine-tuning controls inside card */}
                       {isSelected && (
                         <div
@@ -2114,6 +2340,37 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                               className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-2.5 py-1 text-[11px] text-white placeholder-zinc-600 focus:outline-none focus:border-rose-500/60"
                             />
                           </div>
+
+                          {/* Quick Title Variants */}
+                          {clip.titleVariants && clip.titleVariants.length > 0 && (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[8.5px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                                <Sparkles size={9} className="text-amber-400" />
+                                <span>Suggested Headlines (Click to Apply):</span>
+                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {clip.titleVariants.map((variant, vIdx) => (
+                                  <button
+                                    key={vIdx}
+                                    type="button"
+                                    onClick={() =>
+                                      setCustomHeadlines({
+                                        ...customHeadlines,
+                                        [clip.id]: variant,
+                                      })
+                                    }
+                                    className={`px-2 py-0.5 rounded text-[9.5px] text-left transition-all border cursor-pointer ${
+                                      (customHeadlines[clip.id] || clip.suggestedHeadline) === variant
+                                        ? 'bg-rose-500/20 border-rose-500/60 text-rose-300 font-bold'
+                                        : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                                    }`}
+                                  >
+                                    {variant}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
                           {/* Trimming Adjusters */}
                           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -2660,8 +2917,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
                   {/* Right Column in Big Box: Studio Controls & Actions */}
                   <div className="flex-1 w-full flex flex-col gap-4 min-w-0">
-                    {/* Active Clip Quick Headline Customizer */}
-                    <div className="w-full p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2 shadow-inner">
+                    {/* Active Clip Quick Headline Customizer & Clickable Viral Title Variants */}
+                    <div className="w-full p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2.5 shadow-inner">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
                           Top Headline Text
@@ -2681,7 +2938,130 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         }
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500 font-bold"
                       />
+
+                      {/* Clickable Viral Title Variants */}
+                      {activeClip?.titleVariants && activeClip.titleVariants.length > 0 && (
+                        <div className="flex flex-col gap-1.5 pt-1 border-t border-zinc-850">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                              <Sparkles size={10} className="text-amber-400" />
+                              <span>Click to apply viral title variant:</span>
+                            </span>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            {activeClip.titleVariants.map((variant, vIdx) => (
+                              <button
+                                key={vIdx}
+                                type="button"
+                                onClick={() =>
+                                  setCustomHeadlines({
+                                    ...customHeadlines,
+                                    [activeClip.id]: variant,
+                                  })
+                                }
+                                className={`px-2.5 py-1.5 rounded-lg text-[10.5px] text-left transition-all border cursor-pointer flex items-center justify-between ${
+                                  (customHeadlines[activeClip.id] || activeClip.suggestedHeadline) === variant
+                                    ? 'bg-rose-500/20 border-rose-500/60 text-rose-300 font-bold'
+                                    : 'bg-zinc-950/80 hover:bg-zinc-850 border-zinc-850 text-zinc-300 hover:text-white'
+                                }`}
+                              >
+                                <span className="truncate">{variant}</span>
+                                {(customHeadlines[activeClip.id] || activeClip.suggestedHeadline) === variant && (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500 text-white font-bold ml-2 shrink-0">
+                                    Active
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Viral Clip Analytics & Ready-to-Post Social Kit */}
+                    {activeClip && (
+                      <div className="w-full p-3.5 rounded-2xl bg-gradient-to-br from-zinc-900 via-zinc-950 to-zinc-900 border border-rose-500/25 flex flex-col gap-3 shadow-md shadow-rose-950/15">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                              <Flame size={12} />
+                            </div>
+                            <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
+                              Virality Dossier & Social Post Kit
+                            </span>
+                          </div>
+                          <span className="text-[9.5px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                            {activeClip.viralityScore}% Retention Score
+                          </span>
+                        </div>
+
+                        {/* Metrics Pills: Pacing, Engagement Type, Speech Tempo */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[10px]">
+                          <div className="p-2 rounded-xl bg-zinc-950/80 border border-zinc-850 flex flex-col gap-0.5">
+                            <span className="text-[8.5px] uppercase font-bold text-zinc-500">Video Pacing</span>
+                            <span className="text-zinc-200 font-bold truncate">{activeClip.pacing || '⚡ Fast-Paced'}</span>
+                          </div>
+                          <div className="p-2 rounded-xl bg-zinc-950/80 border border-zinc-850 flex flex-col gap-0.5">
+                            <span className="text-[8.5px] uppercase font-bold text-zinc-500">Audience Trigger</span>
+                            <span className="text-purple-300 font-bold truncate">{activeClip.engagementType || '💬 High Debate'}</span>
+                          </div>
+                          <div className="p-2 rounded-xl bg-zinc-950/80 border border-zinc-850 flex flex-col gap-0.5">
+                            <span className="text-[8.5px] uppercase font-bold text-zinc-500">Speech Cadence</span>
+                            <span className="text-blue-300 font-mono font-bold truncate">
+                              {activeClip.speechTempo || '140 WPM'} {activeClip.wordCount ? `(${activeClip.wordCount} words)` : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Ready-to-Post Description / Caption */}
+                        <div className="flex flex-col gap-1.5 pt-1 border-t border-zinc-850">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                              <FileText size={11} className="text-rose-400" />
+                              <span>Ready-to-Post Caption (Shorts & Reels):</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyClipDescription()}
+                              className="px-2 py-0.5 rounded-md bg-zinc-850 hover:bg-zinc-800 text-zinc-200 hover:text-white border border-zinc-750 text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                            >
+                              {copiedDescription ? (
+                                <>
+                                  <Check size={11} className="text-emerald-400" />
+                                  <span className="text-emerald-400">Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy size={11} />
+                                  <span>Copy Caption</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                          <div className="p-2 rounded-xl bg-zinc-950 border border-zinc-850 text-[10px] text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed select-all">
+                            {activeClip.recommendedDescription || `🚨 ${activeClip.suggestedHeadline || activeClip.title}\n\n"${activeClip.hook}"\n\n📌 Breakdown: ${activeClip.reason}\n\n👇 Tell us what you think in the comments!\n\n#shorts #viral #trending #reels #fyp`}
+                          </div>
+                        </div>
+
+                        {/* Key Topics Tags */}
+                        {activeClip.keyTopics && activeClip.keyTopics.length > 0 && (
+                          <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                            <span className="text-[9px] uppercase font-bold text-zinc-500 mr-1">Key Topics:</span>
+                            {activeClip.keyTopics.map((topic, tIdx) => (
+                              <button
+                                key={tIdx}
+                                type="button"
+                                onClick={() => handleCopySingleTag(topic)}
+                                className="px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800 hover:border-rose-500/40 text-zinc-400 hover:text-zinc-200 text-[9.5px] font-mono cursor-pointer transition-all"
+                                title="Click to copy tag"
+                              >
+                                #{topic}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Motion Graphical Texts / Kinetic Lyric Captions Style Selector */}
                     <div className="w-full p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2.5 shadow-inner">
