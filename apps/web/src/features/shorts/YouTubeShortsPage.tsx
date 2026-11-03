@@ -235,8 +235,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [exportedClips, setExportedClips] = useState<Array<{ title: string; filename: string; url: string; duration: number }>>([]);
 
   // Video Preview & Player Controls State
+  const phoneRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isEmbedPlaying, setIsEmbedPlaying] = useState(false);
   const [currentPlayTime, setCurrentPlayTime] = useState(0);
   const [volume, setVolume] = useState<number>(1);
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -323,6 +325,17 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
     }
   };
 
+  // Reset play state and position whenever active clip changes
+  useEffect(() => {
+    setIsPlaying(false);
+    setIsEmbedPlaying(false);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = currentStart;
+    }
+    setCurrentPlayTime(currentStart);
+  }, [selectedClipId]);
+
   // Sync Video Playback for active clip
   useEffect(() => {
     if (!videoRef.current || !activeClip) return;
@@ -360,6 +373,27 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       v.removeEventListener('pause', handlePause);
     };
   }, [selectedClipId, currentStart, currentEnd, isLooping]);
+
+  // Real-time ticker when previewing embed (before local video file finishes buffering)
+  useEffect(() => {
+    if (!isEmbedPlaying || job?.videoUrl) return;
+    const interval = setInterval(() => {
+      setCurrentPlayTime((prev) => {
+        const next = prev + 0.1;
+        if (next >= currentEnd) {
+          if (isLooping) {
+            return currentStart;
+          } else {
+            setIsEmbedPlaying(false);
+            setIsPlaying(false);
+            return currentStart;
+          }
+        }
+        return next;
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isEmbedPlaying, job?.videoUrl, currentStart, currentEnd, isLooping]);
 
   // High-frequency smooth progress interpolation (60fps feel)
   useEffect(() => {
@@ -621,13 +655,20 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
   // Toggle Video Play/Pause
   const togglePlay = () => {
-    if (!videoRef.current) return;
-    if (isPlaying) {
-      videoRef.current.pause();
-      setIsPlaying(false);
+    if (job?.videoUrl && videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        videoRef.current.play().catch((e) => console.warn('Video play note:', e));
+        setIsPlaying(true);
+      }
     } else {
-      videoRef.current.play();
-      setIsPlaying(true);
+      setIsEmbedPlaying((prev) => {
+        const next = !prev;
+        setIsPlaying(next);
+        return next;
+      });
     }
   };
 
@@ -664,16 +705,19 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
   // Video Playing Control Handlers
   const handleSeek = (newSec: number) => {
-    if (!videoRef.current) return;
     const target = currentStart + Math.max(0, Math.min(clipDuration, newSec));
-    videoRef.current.currentTime = target;
+    if (videoRef.current) {
+      videoRef.current.currentTime = target;
+    }
     setCurrentPlayTime(target);
   };
 
   const handleSkip = (seconds: number) => {
-    if (!videoRef.current) return;
-    const target = Math.max(currentStart, Math.min(currentEnd, videoRef.current.currentTime + seconds));
-    videoRef.current.currentTime = target;
+    const current = videoRef.current ? videoRef.current.currentTime : currentPlayTime;
+    const target = Math.max(currentStart, Math.min(currentEnd, current + seconds));
+    if (videoRef.current) {
+      videoRef.current.currentTime = target;
+    }
     setCurrentPlayTime(target);
   };
 
@@ -688,25 +732,30 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   };
 
   const handleToggleMute = () => {
-    if (!videoRef.current) return;
     const next = !isMuted;
-    videoRef.current.muted = next;
+    if (videoRef.current) {
+      videoRef.current.muted = next;
+    }
     setIsMuted(next);
   };
 
   const handleVolumeChange = (newVol: number) => {
-    if (!videoRef.current) return;
-    videoRef.current.volume = newVol;
+    if (videoRef.current) {
+      videoRef.current.volume = newVol;
+      if (newVol > 0 && isMuted) {
+        videoRef.current.muted = false;
+      }
+    }
     setVolume(newVol);
     if (newVol > 0 && isMuted) {
-      videoRef.current.muted = false;
       setIsMuted(false);
     }
   };
 
   const handleFullscreen = () => {
-    if (!videoRef.current) return;
-    if (videoRef.current.requestFullscreen) {
+    if (phoneRef.current && phoneRef.current.requestFullscreen) {
+      phoneRef.current.requestFullscreen();
+    } else if (videoRef.current && videoRef.current.requestFullscreen) {
       videoRef.current.requestFullscreen();
     }
   };
@@ -2201,26 +2250,28 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
                 {/* Simulated Smartphone Shell */}
                 <div
+                  ref={phoneRef}
                   className={`relative ${
                     phonePreviewSize === 'compact'
                       ? 'w-[230px] h-[408px]'
                       : phonePreviewSize === 'standard'
                       ? 'w-[270px] h-[480px]'
                       : 'w-[300px] sm:w-[325px] h-[533px] sm:h-[578px]'
-                  } bg-black rounded-[36px] p-2 sm:p-2.5 shadow-2xl border-4 border-zinc-800 ring-1 ring-zinc-700/50 overflow-hidden flex flex-col items-center justify-center transition-all duration-200`}
+                  } bg-black rounded-[36px] p-2 sm:p-2.5 shadow-2xl border-4 border-zinc-800 ring-1 ring-zinc-700/50 overflow-hidden flex flex-col items-center justify-center transition-all duration-200 group/phone`}
                 >
                   {/* Camera notch */}
-                  <div className="absolute top-2 w-16 h-3 bg-zinc-900 rounded-full z-30" />
+                  <div className="absolute top-2 w-16 h-3 bg-zinc-900 rounded-full z-30 pointer-events-none" />
 
                   {/* Screen viewport */}
                   <div className="relative w-full h-full rounded-[26px] overflow-hidden bg-black flex items-center justify-center">
+                    {/* Media Layer */}
                     {job.videoUrl ? (
                       <>
                         {/* Background for 9:16 blurred mode */}
                         {aspectRatio === '9:16-blur' && (
                           <video
                             src={`${API_URL}${job.videoUrl}`}
-                            className="absolute inset-0 w-full h-full object-cover blur-md opacity-60 scale-125"
+                            className="absolute inset-0 w-full h-full object-cover blur-md opacity-60 scale-125 select-none pointer-events-none"
                             muted
                             loop
                             playsInline
@@ -2231,6 +2282,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         <video
                           ref={videoRef}
                           src={`${API_URL}${job.videoUrl}`}
+                          poster={job?.videoInfo?.thumbnail}
+                          preload="auto"
                           className={`relative z-10 ${
                             aspectRatio === '9:16-crop'
                               ? 'w-full h-full object-cover'
@@ -2240,245 +2293,35 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           }`}
                           playsInline
                         />
-
-                        {/* Simulated Top Headline Banner */}
-                        {currentHeadline && (
-                          <div className="absolute top-8 left-3 right-3 z-20 pointer-events-none">
-                            <div className="bg-black/75 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-1.5 text-center shadow-lg">
-                              <span className="text-[10px] font-black tracking-wide text-white uppercase drop-shadow">
-                                {currentHeadline}
-                              </span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Real-Time Kinetic Motion Graphics Lyric/Dialogue Subtitle Overlay */}
-                        {captionStyle !== 'none' && (() => {
-                          const currentSegs = activeClip?.transcriptSegments || job?.transcript || [];
-                          const activeSeg = currentSegs.find(
-                            (s) => currentPlayTime >= s.start - 0.05 && currentPlayTime <= s.end + 0.35
-                          );
-                          if (!activeSeg) return null;
-
-                          const words =
-                            activeSeg.words && activeSeg.words.length > 0
-                              ? activeSeg.words
-                              : activeSeg.text.split(/\s+/).map((w, idx, arr) => ({
-                                  word: w,
-                                  start: activeSeg.start + (idx * (activeSeg.end - activeSeg.start)) / arr.length,
-                                  end: activeSeg.start + ((idx + 1) * (activeSeg.end - activeSeg.start)) / arr.length,
-                                }));
-
-                          const activeWordIdx = words.findIndex(
-                            (w) => currentPlayTime >= w.start && currentPlayTime <= w.end
-                          );
-
-                          return (
-                            <div className="absolute bottom-16 left-3 right-3 z-20 pointer-events-none flex justify-center text-center">
-                              <div
-                                className={`px-2.5 py-1.5 rounded-xl max-w-[95%] transition-all ${
-                                  captionStyle === 'minimal'
-                                    ? 'bg-black/60 backdrop-blur-sm border border-white/10'
-                                    : 'drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]'
-                                }`}
-                              >
-                                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-black uppercase tracking-wide">
-                                  {words.map((w, wIdx) => {
-                                    const isWordActive =
-                                      wIdx === activeWordIdx || (activeWordIdx === -1 && wIdx === 0);
-                                    return (
-                                      <span
-                                        key={wIdx}
-                                        className={`transition-all duration-100 inline-block ${
-                                          isWordActive
-                                            ? captionStyle === 'neon'
-                                              ? 'text-[#00F5FF] scale-125 font-black drop-shadow-[0_0_12px_#00F5FF]'
-                                              : captionStyle === 'mrbeast'
-                                              ? 'text-[#39FF14] scale-125 font-black drop-shadow-[0_0_10px_#39FF14]'
-                                              : captionStyle === 'karaoke'
-                                              ? 'text-[#FFE81F] scale-115 font-black'
-                                              : captionStyle === 'minimal'
-                                              ? 'text-white scale-105 font-bold'
-                                              : 'text-[#FFE81F] scale-125 font-black drop-shadow-[0_0_10px_#FFE81F]'
-                                            : 'text-white/80 text-[10.5px] sm:text-xs'
-                                        } ${isWordActive ? 'text-xs sm:text-sm' : ''}`}
-                                        style={{
-                                          textShadow: isWordActive
-                                            ? '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000'
-                                            : '1px 1px 0 #000, -1px -1px 0 #000',
-                                        }}
-                                      >
-                                        {w.word}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Floating Play/Pause overlay */}
-                        <button
-                          onClick={togglePlay}
-                          className="absolute inset-0 z-10 flex items-center justify-center bg-black/20 hover:bg-black/35 transition-all opacity-0 hover:opacity-100"
-                        >
-                          <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white shadow-xl">
-                            {isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
-                          </div>
-                        </button>
-
-                        {/* In-Phone Floating Mini Player HUD */}
-                        <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 bg-black/70 backdrop-blur-md rounded-xl p-2 flex items-center justify-between border border-white/10 text-white shadow-xl">
-                          <button
-                            type="button"
-                            onClick={togglePlay}
-                            className="w-7 h-7 rounded-lg bg-rose-500 hover:bg-rose-400 flex items-center justify-center transition-all shrink-0 cursor-pointer"
-                            title={isPlaying ? 'Pause' : 'Play'}
-                          >
-                            {isPlaying ? <Pause size={12} /> : <Play size={12} className="ml-0.5" />}
-                          </button>
-
-                          <div className="flex-1 mx-2">
-                            <div className="flex justify-between text-[9px] font-mono text-zinc-300">
-                              <span>{formatTime(currentProgressSec)}</span>
-                              <span>{formatTime(clipDuration)}</span>
-                            </div>
-                            <div
-                              onClick={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const pct = (e.clientX - rect.left) / rect.width;
-                                handleSeek(pct * clipDuration);
-                              }}
-                              className="w-full bg-zinc-800 h-1.5 rounded-full cursor-pointer relative overflow-hidden mt-0.5"
-                            >
-                              <div
-                                className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full"
-                                style={{ width: `${(currentProgressSec / clipDuration) * 100}%` }}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={handleToggleMute}
-                              className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-                              title={isMuted ? 'Unmute' : 'Mute'}
-                            >
-                              {isMuted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleFullscreen}
-                              className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-                              title="Fullscreen"
-                            >
-                              <Maximize2 size={13} />
-                            </button>
-                          </div>
-                        </div>
                       </>
+                    ) : isEmbedPlaying && job?.videoInfo?.id && job.videoInfo.id !== 'unknown' ? (
+                      <iframe
+                        key={`yt-preview-${activeClip?.id || 'main'}-${Math.floor(currentStart)}`}
+                        src={`https://www.youtube.com/embed/${job.videoInfo.id}?start=${Math.floor(currentStart)}&end=${Math.ceil(currentEnd)}&autoplay=1&controls=1&rel=0&modestbranding=1`}
+                        title={activeClip?.title || 'YouTube Short Preview'}
+                        className="relative z-10 w-full h-full object-cover pointer-events-auto"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
                     ) : job?.videoInfo?.id && job.videoInfo.id !== 'unknown' ? (
-                      <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden">
-                        {/* Instant YouTube Stream Preview Trimmed to Start/End */}
-                        <iframe
-                          key={`yt-preview-${activeClip?.id || 'main'}-${Math.floor(currentStart)}`}
-                          src={`https://www.youtube-nocookie.com/embed/${job.videoInfo.id}?start=${Math.floor(currentStart)}&end=${Math.ceil(currentEnd)}&autoplay=1&controls=0&rel=0&modestbranding=1&loop=1`}
-                          title={activeClip?.title || 'YouTube Short Preview'}
-                          className="w-full h-full object-cover pointer-events-auto"
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                          allowFullScreen
+                      <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden select-none">
+                        {/* Ambient blurred backdrop */}
+                        <img
+                          src={job?.videoInfo?.thumbnail || `https://i.ytimg.com/vi/${job?.videoInfo?.id}/hqdefault.jpg`}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover blur-xl opacity-60 scale-125 select-none pointer-events-none"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
-
-                        {/* Simulated Top Headline Banner */}
-                        {currentHeadline && (
-                          <div className="absolute top-8 left-3 right-3 z-20 pointer-events-none">
-                            <div className="bg-black/75 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-1.5 text-center shadow-lg">
-                              <span className="text-[10px] font-black tracking-wide text-white uppercase drop-shadow">
-                                {currentHeadline}
-                              </span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Real-Time Kinetic Motion Graphics Lyric/Dialogue Subtitle Overlay */}
-                        {captionStyle !== 'none' && (() => {
-                          const currentSegs = activeClip?.transcriptSegments || job?.transcript || [];
-                          const activeSeg = currentSegs.find(
-                            (s) => currentPlayTime >= s.start - 0.05 && currentPlayTime <= s.end + 0.35
-                          );
-                          if (!activeSeg) return null;
-
-                          const words =
-                            activeSeg.words && activeSeg.words.length > 0
-                              ? activeSeg.words
-                              : activeSeg.text.split(/\s+/).map((w, idx, arr) => ({
-                                  word: w,
-                                  start: activeSeg.start + (idx * (activeSeg.end - activeSeg.start)) / arr.length,
-                                  end: activeSeg.start + ((idx + 1) * (activeSeg.end - activeSeg.start)) / arr.length,
-                                }));
-
-                          const activeWordIdx = words.findIndex(
-                            (w) => currentPlayTime >= w.start && currentPlayTime <= w.end
-                          );
-
-                          return (
-                            <div className="absolute bottom-16 left-3 right-3 z-20 pointer-events-none flex justify-center text-center">
-                              <div
-                                className={`px-2.5 py-1.5 rounded-xl max-w-[95%] transition-all ${
-                                  captionStyle === 'minimal'
-                                    ? 'bg-black/60 backdrop-blur-sm border border-white/10'
-                                    : 'drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]'
-                                }`}
-                              >
-                                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-black uppercase tracking-wide">
-                                  {words.map((w, wIdx) => {
-                                    const isWordActive =
-                                      wIdx === activeWordIdx || (activeWordIdx === -1 && wIdx === 0);
-                                    return (
-                                      <span
-                                        key={wIdx}
-                                        className={`transition-all duration-100 inline-block ${
-                                          isWordActive
-                                            ? captionStyle === 'neon'
-                                              ? 'text-[#00F5FF] scale-125 font-black drop-shadow-[0_0_12px_#00F5FF]'
-                                              : captionStyle === 'mrbeast'
-                                              ? 'text-[#39FF14] scale-125 font-black drop-shadow-[0_0_10px_#39FF14]'
-                                              : captionStyle === 'karaoke'
-                                              ? 'text-[#FFE81F] scale-115 font-black'
-                                              : captionStyle === 'minimal'
-                                              ? 'text-white scale-105 font-bold'
-                                              : 'text-[#FFE81F] scale-125 font-black drop-shadow-[0_0_10px_#FFE81F]'
-                                            : 'text-white/80 text-[10.5px] sm:text-xs'
-                                        } ${isWordActive ? 'text-xs sm:text-sm' : ''}`}
-                                        style={{
-                                          textShadow: isWordActive
-                                            ? '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000'
-                                            : '1px 1px 0 #000, -1px -1px 0 #000',
-                                        }}
-                                      >
-                                        {w.word}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Stream sync overlay badge at bottom */}
-                        <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 pointer-events-none bg-zinc-950/85 backdrop-blur-md rounded-xl p-2 border border-zinc-800 flex items-center justify-between text-[10px]">
-                          <span className="text-zinc-300 font-medium flex items-center gap-1.5">
-                            <RefreshCw size={11} className="animate-spin text-rose-400" />
-                            <span>Buffering HD stream for export...</span>
-                          </span>
-                          <span className="font-mono text-amber-300 font-bold">
-                            {job?.downloadProgress?.percent ? `${Math.round(job.downloadProgress.percent)}%` : `${Math.round(displayProgress)}%`}
-                            {job?.downloadProgress?.speed ? ` • ${job.downloadProgress.speed}` : ''}
-                          </span>
-                        </div>
+                        {/* Crisp foreground poster */}
+                        <img
+                          src={job?.videoInfo?.thumbnail || `https://i.ytimg.com/vi/${job?.videoInfo?.id}/hqdefault.jpg`}
+                          alt={activeClip?.title || 'Preview thumbnail'}
+                          className={`relative z-10 ${
+                            aspectRatio === '9:16-crop'
+                              ? 'w-full h-full object-cover'
+                              : 'w-full object-contain max-h-full'
+                          }`}
+                        />
                       </div>
                     ) : (
                       <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-zinc-950 text-center gap-2.5">
@@ -2498,6 +2341,169 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         </div>
                       </div>
                     )}
+
+                    {/* Stream sync overlay badge at top right when buffering local MP4 */}
+                    {!job.videoUrl && job?.videoInfo?.id && (
+                      <div className="absolute top-2.5 right-2.5 z-25 pointer-events-none bg-black/75 backdrop-blur-md rounded-full px-2.5 py-1 border border-zinc-700/60 flex items-center gap-1.5 text-[9px] shadow-lg">
+                        <RefreshCw size={10} className="animate-spin text-rose-400" />
+                        <span className="text-zinc-200 font-mono font-medium">
+                          {job?.downloadProgress?.percent ? `Buffering HD ${Math.round(job.downloadProgress.percent)}%` : 'Stream ready'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Simulated Top Headline Banner */}
+                    {currentHeadline && (
+                      <div className="absolute top-8 left-3 right-3 z-20 pointer-events-none">
+                        <div className="bg-black/75 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-1.5 text-center shadow-lg">
+                          <span className="text-[10px] font-black tracking-wide text-white uppercase drop-shadow">
+                            {currentHeadline}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Real-Time Kinetic Motion Graphics Lyric/Dialogue Subtitle Overlay */}
+                    {captionStyle !== 'none' && (() => {
+                      const currentSegs = activeClip?.transcriptSegments || job?.transcript || [];
+                      const activeSeg = currentSegs.find(
+                        (s) => currentPlayTime >= s.start - 0.05 && currentPlayTime <= s.end + 0.35
+                      );
+                      if (!activeSeg) return null;
+
+                      const words =
+                        activeSeg.words && activeSeg.words.length > 0
+                          ? activeSeg.words
+                          : activeSeg.text.split(/\s+/).map((w, idx, arr) => ({
+                              word: w,
+                              start: activeSeg.start + (idx * (activeSeg.end - activeSeg.start)) / arr.length,
+                              end: activeSeg.start + ((idx + 1) * (activeSeg.end - activeSeg.start)) / arr.length,
+                            }));
+
+                      const activeWordIdx = words.findIndex(
+                        (w) => currentPlayTime >= w.start && currentPlayTime <= w.end
+                      );
+
+                      return (
+                        <div className="absolute bottom-16 left-3 right-3 z-20 pointer-events-none flex justify-center text-center">
+                          <div
+                            className={`px-2.5 py-1.5 rounded-xl max-w-[95%] transition-all ${
+                              captionStyle === 'minimal'
+                                ? 'bg-black/60 backdrop-blur-sm border border-white/10'
+                                : 'drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-black uppercase tracking-wide">
+                              {words.map((w, wIdx) => {
+                                const isWordActive =
+                                  wIdx === activeWordIdx || (activeWordIdx === -1 && wIdx === 0);
+                                return (
+                                  <span
+                                    key={wIdx}
+                                    className={`transition-all duration-100 inline-block ${
+                                      isWordActive
+                                        ? captionStyle === 'neon'
+                                          ? 'text-[#00F5FF] scale-125 font-black drop-shadow-[0_0_12px_#00F5FF]'
+                                          : captionStyle === 'mrbeast'
+                                          ? 'text-[#39FF14] scale-125 font-black drop-shadow-[0_0_10px_#39FF14]'
+                                          : captionStyle === 'karaoke'
+                                          ? 'text-[#FFE81F] scale-115 font-black'
+                                          : captionStyle === 'minimal'
+                                          ? 'text-white scale-105 font-bold'
+                                          : 'text-[#FFE81F] scale-125 font-black drop-shadow-[0_0_10px_#FFE81F]'
+                                        : 'text-white/80 text-[10.5px] sm:text-xs'
+                                    } ${isWordActive ? 'text-xs sm:text-sm' : ''}`}
+                                    style={{
+                                      textShadow: isWordActive
+                                        ? '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000'
+                                        : '1px 1px 0 #000, -1px -1px 0 #000',
+                                    }}
+                                  >
+                                    {w.word}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Floating Central Play / Pause Button - Prominently visible when paused */}
+                    {!isPlaying && !isEmbedPlaying ? (
+                      <button
+                        type="button"
+                        onClick={togglePlay}
+                        className="absolute inset-0 z-25 flex items-center justify-center bg-black/25 hover:bg-black/40 transition-all cursor-pointer group/centerplay"
+                        title="Click to Play Short"
+                      >
+                        <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-rose-600 via-rose-500 to-red-500 text-white flex items-center justify-center shadow-2xl shadow-rose-600/50 ring-4 ring-white/30 group-hover/centerplay:scale-110 active:scale-95 transition-transform duration-200">
+                          <Play size={28} className="ml-1 fill-white text-white" />
+                        </div>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={togglePlay}
+                        className="absolute inset-0 z-25 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity cursor-pointer group/centerpause"
+                        title="Click to Pause Short"
+                      >
+                        <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center shadow-xl ring-2 ring-white/20 hover:scale-105 active:scale-95 transition-transform">
+                          <Pause size={24} className="fill-white text-white" />
+                        </div>
+                      </button>
+                    )}
+
+                    {/* In-Phone Floating Mini Player HUD - ALWAYS visible inside phone viewport */}
+                    <div className="absolute bottom-2.5 left-2.5 right-2.5 z-30 bg-black/75 backdrop-blur-md rounded-xl p-2 flex items-center justify-between border border-white/10 text-white shadow-xl">
+                      <button
+                        type="button"
+                        onClick={togglePlay}
+                        className="w-7 h-7 rounded-lg bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-400 hover:to-red-400 text-white flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-md active:scale-95"
+                        title={isPlaying || isEmbedPlaying ? 'Pause' : 'Play'}
+                      >
+                        {isPlaying || isEmbedPlaying ? <Pause size={12} className="fill-white" /> : <Play size={12} className="ml-0.5 fill-white" />}
+                      </button>
+
+                      <div className="flex-1 mx-2">
+                        <div className="flex justify-between text-[9px] font-mono text-zinc-300">
+                          <span>{formatTime(currentProgressSec)}</span>
+                          <span>{formatTime(clipDuration)}</span>
+                        </div>
+                        <div
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const pct = (e.clientX - rect.left) / rect.width;
+                            handleSeek(pct * clipDuration);
+                          }}
+                          className="w-full bg-zinc-800 h-1.5 rounded-full cursor-pointer relative overflow-hidden mt-0.5"
+                        >
+                          <div
+                            className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full"
+                            style={{ width: `${Math.min(100, Math.max(0, (currentProgressSec / clipDuration) * 100))}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleToggleMute}
+                          className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                          title={isMuted ? 'Unmute' : 'Mute'}
+                        >
+                          {isMuted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleFullscreen}
+                          className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                          title="Fullscreen"
+                        >
+                          <Maximize2 size={13} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -2540,8 +2546,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       onClick={togglePlay}
                       className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 active:scale-95 transition-all cursor-pointer"
                     >
-                      {isPlaying ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
-                      <span>{isPlaying ? 'Pause' : 'Play'}</span>
+                      {isPlaying || isEmbedPlaying ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
+                      <span>{isPlaying || isEmbedPlaying ? 'Pause' : 'Play'}</span>
                     </button>
 
                     <button
