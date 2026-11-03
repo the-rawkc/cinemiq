@@ -25,9 +25,34 @@ import {
   Maximize2,
   FolderDown,
   FolderOpen,
-  Hash
+  Hash,
+  Music,
+  Sparkles
 } from 'lucide-react';
 import { API_URL } from '../../config';
+
+export type CaptionStyle = 'hormozi' | 'neon' | 'mrbeast' | 'karaoke' | 'minimal' | 'none';
+
+export interface TranscriptWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+  words?: TranscriptWord[];
+}
+
+export interface MusicTrack {
+  id: string;
+  name: string;
+  genre: string;
+  mood: string;
+  url: string;
+}
 
 const YoutubeIcon: React.FC<{ size?: number; className?: string }> = ({ size = 20, className = '' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
@@ -59,6 +84,7 @@ interface ViralClip {
   hook: string;
   suggestedHeadline: string;
   tags: string[];
+  transcriptSegments?: TranscriptSegment[];
 }
 
 interface DownloadProgress {
@@ -77,6 +103,7 @@ interface ShortsJob {
   videoInfo?: VideoInfo;
   videoUrl?: string;
   clips?: ViralClip[];
+  transcript?: TranscriptSegment[];
   error?: string;
   downloadProgress?: DownloadProgress;
   generationTimeMs?: number;
@@ -162,6 +189,21 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<'9:16-blur' | '9:16-crop' | '16:9-fit' | 'original'>('9:16-blur');
   const [phonePreviewSize, setPhonePreviewSize] = useState<'compact' | 'standard' | 'large'>('large');
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>('hormozi');
+  const [bgMusicTrack, setBgMusicTrack] = useState<string>('lofi-sunset');
+  const [bgMusicVolume, setBgMusicVolume] = useState<number>(0.2);
+  const [autoDucking, setAutoDucking] = useState<boolean>(true);
+  const [musicTracks, setMusicTracks] = useState<MusicTrack[]>([
+    { id: 'lofi-sunset', name: 'Lofi Sunset Chill', genre: 'Lo-Fi / Study / Relaxed', mood: 'Chill & Relaxed', url: '/uploads/music/lofi-sunset.mp3' },
+    { id: 'energetic-hype', name: 'Energetic Hype', genre: 'Upbeat / Action / Electronic', mood: 'Hype & Dynamic', url: '/uploads/music/energetic-hype.mp3' },
+    { id: 'cinematic-suspense', name: 'Cinematic Suspense', genre: 'Dramatic / Mystery / Tension', mood: 'Epic & Suspenseful', url: '/uploads/music/cinematic-suspense.mp3' },
+    { id: 'ambient-focus', name: 'Ambient Focus', genre: 'Calm / Inspiring / Tech', mood: 'Modern & Clean', url: '/uploads/music/ambient-focus.mp3' },
+    { id: 'studio-beat', name: 'Studio Beats', genre: 'Hip Hop / Rhythmic / Urban', mood: 'Punchy & Groovy', url: '/uploads/music/studio-beat.mp3' },
+    { id: 'modern-rhythm', name: 'Modern Rhythm', genre: 'Pop / Upbeat / Trending', mood: 'Bright & Positive', url: '/uploads/music/modern-rhythm.mp3' },
+    { id: 'none', name: 'Original Audio Only (No Music)', genre: 'Clean Dialogue', mood: 'Original', url: '' },
+  ]);
+  const [isMusicPreviewPlaying, setIsMusicPreviewPlaying] = useState<boolean>(false);
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
   const [customHeadlines, setCustomHeadlines] = useState<Record<string, string>>({});
   const [clipTrims, setClipTrims] = useState<Record<string, { start: number; end: number }>>({});
   const [copiedAllHashtags, setCopiedAllHashtags] = useState(false);
@@ -225,6 +267,61 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       setSelectedClipId(clips[0].id);
     }
   }, [clips, selectedClipId]);
+
+  // Fetch available royalty-free music tracks from backend on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/shorts/music-tracks`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
+          setMusicTracks(data.tracks);
+        }
+      })
+      .catch((err) => console.warn('Music tracks fetch note:', err));
+  }, []);
+
+  // Stop music preview when unmounting
+  useEffect(() => {
+    return () => {
+      if (musicAudioRef.current) {
+        musicAudioRef.current.pause();
+      }
+    };
+  }, []);
+
+  const toggleMusicPreview = (trackId: string) => {
+    const track = musicTracks.find((t) => t.id === trackId);
+    if (!track || !track.url) {
+      if (musicAudioRef.current) {
+        musicAudioRef.current.pause();
+        setIsMusicPreviewPlaying(false);
+      }
+      return;
+    }
+
+    if (!musicAudioRef.current) {
+      musicAudioRef.current = new Audio();
+    }
+
+    const audio = musicAudioRef.current;
+    const fullAudioUrl = track.url.startsWith('http') ? track.url : `${API_URL}${track.url}`;
+
+    if (isMusicPreviewPlaying && bgMusicTrack === trackId) {
+      audio.pause();
+      setIsMusicPreviewPlaying(false);
+    } else {
+      audio.src = fullAudioUrl;
+      audio.volume = Math.max(0.05, Math.min(1, bgMusicVolume));
+      audio.loop = true;
+      audio
+        .play()
+        .then(() => {
+          setBgMusicTrack(trackId);
+          setIsMusicPreviewPlaying(true);
+        })
+        .catch((e) => console.warn('Audio play preview error:', e));
+    }
+  };
 
   // Sync Video Playback for active clip
   useEffect(() => {
@@ -653,6 +750,11 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           aspectRatio,
           headlineText,
           targetResolution,
+          captionStyle,
+          bgMusicTrack,
+          bgMusicVolume,
+          autoDucking,
+          transcriptSegments: clip.transcriptSegments || job?.transcript || [],
         }),
       });
 
@@ -716,6 +818,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           jobId: job.id,
           aspectRatio,
           targetResolution,
+          captionStyle,
+          bgMusicTrack,
+          bgMusicVolume,
+          autoDucking,
           customHeadlines,
           clipTrims,
         }),
@@ -790,6 +896,11 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           aspectRatio,
           headlineText: currentHeadline,
           targetResolution,
+          captionStyle,
+          bgMusicTrack,
+          bgMusicVolume,
+          autoDucking,
+          transcriptSegments: activeClip.transcriptSegments || job?.transcript || [],
         }),
       });
 
@@ -881,6 +992,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           jobId: job.id,
           aspectRatio,
           targetResolution,
+          captionStyle,
+          bgMusicTrack,
+          bgMusicVolume,
+          autoDucking,
           customHeadlines,
           clipTrims,
         }),
@@ -2137,6 +2252,72 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           </div>
                         )}
 
+                        {/* Real-Time Kinetic Motion Graphics Lyric/Dialogue Subtitle Overlay */}
+                        {captionStyle !== 'none' && (() => {
+                          const currentSegs = activeClip?.transcriptSegments || job?.transcript || [];
+                          const activeSeg = currentSegs.find(
+                            (s) => currentPlayTime >= s.start - 0.05 && currentPlayTime <= s.end + 0.35
+                          );
+                          if (!activeSeg) return null;
+
+                          const words =
+                            activeSeg.words && activeSeg.words.length > 0
+                              ? activeSeg.words
+                              : activeSeg.text.split(/\s+/).map((w, idx, arr) => ({
+                                  word: w,
+                                  start: activeSeg.start + (idx * (activeSeg.end - activeSeg.start)) / arr.length,
+                                  end: activeSeg.start + ((idx + 1) * (activeSeg.end - activeSeg.start)) / arr.length,
+                                }));
+
+                          const activeWordIdx = words.findIndex(
+                            (w) => currentPlayTime >= w.start && currentPlayTime <= w.end
+                          );
+
+                          return (
+                            <div className="absolute bottom-16 left-3 right-3 z-20 pointer-events-none flex justify-center text-center">
+                              <div
+                                className={`px-2.5 py-1.5 rounded-xl max-w-[95%] transition-all ${
+                                  captionStyle === 'minimal'
+                                    ? 'bg-black/60 backdrop-blur-sm border border-white/10'
+                                    : 'drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]'
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-black uppercase tracking-wide">
+                                  {words.map((w, wIdx) => {
+                                    const isWordActive =
+                                      wIdx === activeWordIdx || (activeWordIdx === -1 && wIdx === 0);
+                                    return (
+                                      <span
+                                        key={wIdx}
+                                        className={`transition-all duration-100 inline-block ${
+                                          isWordActive
+                                            ? captionStyle === 'neon'
+                                              ? 'text-[#00F5FF] scale-125 font-black drop-shadow-[0_0_12px_#00F5FF]'
+                                              : captionStyle === 'mrbeast'
+                                              ? 'text-[#39FF14] scale-125 font-black drop-shadow-[0_0_10px_#39FF14]'
+                                              : captionStyle === 'karaoke'
+                                              ? 'text-[#FFE81F] scale-115 font-black'
+                                              : captionStyle === 'minimal'
+                                              ? 'text-white scale-105 font-bold'
+                                              : 'text-[#FFE81F] scale-125 font-black drop-shadow-[0_0_10px_#FFE81F]'
+                                            : 'text-white/80 text-[10.5px] sm:text-xs'
+                                        } ${isWordActive ? 'text-xs sm:text-sm' : ''}`}
+                                        style={{
+                                          textShadow: isWordActive
+                                            ? '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000'
+                                            : '1px 1px 0 #000, -1px -1px 0 #000',
+                                        }}
+                                      >
+                                        {w.word}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         {/* Floating Play/Pause overlay */}
                         <button
                           onClick={togglePlay}
@@ -2220,6 +2401,72 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                             </div>
                           </div>
                         )}
+
+                        {/* Real-Time Kinetic Motion Graphics Lyric/Dialogue Subtitle Overlay */}
+                        {captionStyle !== 'none' && (() => {
+                          const currentSegs = activeClip?.transcriptSegments || job?.transcript || [];
+                          const activeSeg = currentSegs.find(
+                            (s) => currentPlayTime >= s.start - 0.05 && currentPlayTime <= s.end + 0.35
+                          );
+                          if (!activeSeg) return null;
+
+                          const words =
+                            activeSeg.words && activeSeg.words.length > 0
+                              ? activeSeg.words
+                              : activeSeg.text.split(/\s+/).map((w, idx, arr) => ({
+                                  word: w,
+                                  start: activeSeg.start + (idx * (activeSeg.end - activeSeg.start)) / arr.length,
+                                  end: activeSeg.start + ((idx + 1) * (activeSeg.end - activeSeg.start)) / arr.length,
+                                }));
+
+                          const activeWordIdx = words.findIndex(
+                            (w) => currentPlayTime >= w.start && currentPlayTime <= w.end
+                          );
+
+                          return (
+                            <div className="absolute bottom-16 left-3 right-3 z-20 pointer-events-none flex justify-center text-center">
+                              <div
+                                className={`px-2.5 py-1.5 rounded-xl max-w-[95%] transition-all ${
+                                  captionStyle === 'minimal'
+                                    ? 'bg-black/60 backdrop-blur-sm border border-white/10'
+                                    : 'drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]'
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-black uppercase tracking-wide">
+                                  {words.map((w, wIdx) => {
+                                    const isWordActive =
+                                      wIdx === activeWordIdx || (activeWordIdx === -1 && wIdx === 0);
+                                    return (
+                                      <span
+                                        key={wIdx}
+                                        className={`transition-all duration-100 inline-block ${
+                                          isWordActive
+                                            ? captionStyle === 'neon'
+                                              ? 'text-[#00F5FF] scale-125 font-black drop-shadow-[0_0_12px_#00F5FF]'
+                                              : captionStyle === 'mrbeast'
+                                              ? 'text-[#39FF14] scale-125 font-black drop-shadow-[0_0_10px_#39FF14]'
+                                              : captionStyle === 'karaoke'
+                                              ? 'text-[#FFE81F] scale-115 font-black'
+                                              : captionStyle === 'minimal'
+                                              ? 'text-white scale-105 font-bold'
+                                              : 'text-[#FFE81F] scale-125 font-black drop-shadow-[0_0_10px_#FFE81F]'
+                                            : 'text-white/80 text-[10.5px] sm:text-xs'
+                                        } ${isWordActive ? 'text-xs sm:text-sm' : ''}`}
+                                        style={{
+                                          textShadow: isWordActive
+                                            ? '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000'
+                                            : '1px 1px 0 #000, -1px -1px 0 #000',
+                                        }}
+                                      >
+                                        {w.word}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Stream sync overlay badge at bottom */}
                         <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 pointer-events-none bg-zinc-950/85 backdrop-blur-md rounded-xl p-2 border border-zinc-800 flex items-center justify-between text-[10px]">
@@ -2353,6 +2600,159 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
                     />
                   </div>
+                </div>
+
+                {/* Motion Graphical Texts / Kinetic Lyric Captions Style Selector */}
+                <div className="w-full p-3 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-amber-400" />
+                      <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
+                        Kinetic Motion Graphics Lyrics & Captions
+                      </span>
+                    </div>
+                    <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                      Word-by-Word
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 text-[10px]">
+                    {[
+                      { id: 'hormozi', label: 'Hormozi', desc: 'Yellow Pop', color: 'from-amber-500/20 to-yellow-500/10 border-amber-500/50 text-amber-300' },
+                      { id: 'neon', label: 'Neon Cyber', desc: 'Cyan Glow', color: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/50 text-cyan-300' },
+                      { id: 'mrbeast', label: 'MrBeast', desc: 'Lime Burst', color: 'from-lime-500/20 to-emerald-500/10 border-lime-500/50 text-lime-300' },
+                      { id: 'karaoke', label: 'Karaoke', desc: 'Fill Flow', color: 'from-purple-500/20 to-pink-500/10 border-purple-500/50 text-purple-300' },
+                      { id: 'minimal', label: 'Minimal', desc: 'Clean White', color: 'from-zinc-800 to-zinc-900 border-zinc-700 text-zinc-200' },
+                      { id: 'none', label: 'Off', desc: 'No Captions', color: 'from-zinc-900 to-zinc-950 border-zinc-800 text-zinc-500' },
+                    ].map((style) => (
+                      <button
+                        key={style.id}
+                        type="button"
+                        onClick={() => setCaptionStyle(style.id as CaptionStyle)}
+                        className={`p-1.5 rounded-lg border flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
+                          captionStyle === style.id
+                            ? `bg-gradient-to-b ${style.color} shadow-sm font-black ring-1 ring-white/20`
+                            : 'bg-zinc-950/80 border-zinc-850 hover:bg-zinc-900 text-zinc-400 font-semibold'
+                        }`}
+                      >
+                        <span className="truncate w-full font-bold">{style.label}</span>
+                        <span className="text-[8.5px] opacity-75">{style.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Copyright-Free Background Music Selector with Auto-Ducking */}
+                <div className="w-full p-3 rounded-xl bg-gradient-to-r from-zinc-900 via-zinc-950 to-zinc-900 border border-zinc-800 flex flex-col gap-2.5 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Music size={13} className="text-rose-400" />
+                      <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
+                        Copyright-Free Background Music
+                      </span>
+                    </div>
+                    <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30">
+                      Royalty Free
+                    </span>
+                  </div>
+
+                  {/* Track Selection & Play Preview */}
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <select
+                        value={bgMusicTrack}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setBgMusicTrack(val);
+                          if (isMusicPreviewPlaying && musicAudioRef.current) {
+                            const track = musicTracks.find((t) => t.id === val);
+                            if (track?.url) {
+                              musicAudioRef.current.src = track.url.startsWith('http') ? track.url : `${API_URL}${track.url}`;
+                              musicAudioRef.current.play().catch(() => {});
+                            } else {
+                              musicAudioRef.current.pause();
+                              setIsMusicPreviewPlaying(false);
+                            }
+                          }
+                        }}
+                        className="w-full bg-zinc-950 border border-zinc-750 hover:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-rose-500 cursor-pointer"
+                      >
+                        {musicTracks.map((track) => (
+                          <option key={track.id} value={track.id}>
+                            {track.name} ({track.genre})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Preview Play/Stop Button */}
+                    {bgMusicTrack !== 'none' && (
+                      <button
+                        type="button"
+                        onClick={() => toggleMusicPreview(bgMusicTrack)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                          isMusicPreviewPlaying
+                            ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30 animate-pulse'
+                            : 'bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white border border-zinc-700'
+                        }`}
+                        title="Listen to music preview"
+                      >
+                        {isMusicPreviewPlaying ? (
+                          <>
+                            <Pause size={12} />
+                            <span>Stop</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play size={12} />
+                            <span>Preview</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Volume Slider and Auto-Ducking Switch */}
+                  {bgMusicTrack !== 'none' && (
+                    <div className="flex items-center justify-between gap-3 pt-1 border-t border-zinc-850/80 text-[10.5px]">
+                      {/* Music Volume Slider */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-zinc-400 font-semibold">Volume:</span>
+                        <input
+                          type="range"
+                          min="0.05"
+                          max="0.8"
+                          step="0.05"
+                          value={bgMusicVolume}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setBgMusicVolume(val);
+                            if (musicAudioRef.current) {
+                              musicAudioRef.current.volume = val;
+                            }
+                          }}
+                          className="w-16 h-1.5 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer"
+                          title={`Music Volume: ${Math.round(bgMusicVolume * 100)}%`}
+                        />
+                        <span className="font-mono text-zinc-300 font-bold w-7 text-right">
+                          {Math.round(bgMusicVolume * 100)}%
+                        </span>
+                      </div>
+
+                      {/* Auto-Ducking Speech Priority Toggle */}
+                      <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 select-none">
+                        <input
+                          type="checkbox"
+                          checked={autoDucking}
+                          onChange={(e) => setAutoDucking(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded bg-zinc-900 border-zinc-700 accent-rose-500 cursor-pointer"
+                        />
+                        <span className="font-bold text-zinc-300 hover:text-white transition-colors" title="Automatically lowers background music during voice speech so speech remains 100% crisp and clear">
+                          Auto-Duck Dialogue 🎙️
+                        </span>
+                      </label>
+                    </div>
+                  )}
                 </div>
 
                 {/* Primary Action Buttons */}

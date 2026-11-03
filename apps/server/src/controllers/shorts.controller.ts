@@ -1,9 +1,21 @@
 import { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { ShortsService, getUploadsDir } from '../services/shorts.service';
+import { ShortsService, getUploadsDir, getCopyrightFreeMusicTracks } from '../services/shorts.service';
 
 export const ShortsController = {
+  /**
+   * Get list of copyright-free background music tracks
+   */
+  getMusicTracks(req: Request, res: Response): void {
+    try {
+      const tracks = getCopyrightFreeMusicTracks();
+      res.json({ success: true, tracks });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
   /**
    * Fetch YouTube Video Metadata
    */
@@ -81,6 +93,11 @@ export const ShortsController = {
         aspectRatio = '9:16-blur',
         headlineText = '',
         targetResolution = '720p',
+        captionStyle = 'none',
+        bgMusicTrack = 'none',
+        bgMusicVolume = 0.2,
+        autoDucking = true,
+        transcriptSegments,
       } = req.body;
 
       // 1. Resolve disk path from sourceVideoUrl if provided
@@ -110,10 +127,14 @@ export const ShortsController = {
       }
 
       // 2. Check if jobId has an existing videoPath on disk
-      if ((!diskPath || !fs.existsSync(diskPath)) && jobId) {
+      let jobSegments = transcriptSegments;
+      if (jobId) {
         const job = ShortsService.getJobStatus(jobId);
-        if (job?.videoPath && fs.existsSync(job.videoPath)) {
+        if ((!diskPath || !fs.existsSync(diskPath)) && job?.videoPath && fs.existsSync(job.videoPath)) {
           diskPath = job.videoPath;
+        }
+        if (!jobSegments && job?.transcript) {
+          jobSegments = job.transcript;
         }
       }
 
@@ -140,7 +161,7 @@ export const ShortsController = {
         }
       }
 
-      console.log(`🎬 [Shorts] Rendering clip: ${sliceStart}s -> ${sliceEnd}s, ratio: ${aspectRatio}, resolution: ${targetResolution}`);
+      console.log(`🎬 [Shorts] Rendering clip: ${sliceStart}s -> ${sliceEnd}s, ratio: ${aspectRatio}, resolution: ${targetResolution}, captions: ${captionStyle}, music: ${bgMusicTrack}`);
 
       const result = await ShortsService.renderShortClip({
         sourceVideoPath: diskPath,
@@ -149,6 +170,11 @@ export const ShortsController = {
         aspectRatio,
         headlineText,
         targetResolution,
+        captionStyle,
+        transcriptSegments: jobSegments,
+        bgMusicTrack,
+        bgMusicVolume: typeof bgMusicVolume === 'number' ? bgMusicVolume : parseFloat(bgMusicVolume) || 0.2,
+        autoDucking: autoDucking !== false,
       });
 
       res.json({
@@ -217,6 +243,11 @@ export const ShortsController = {
       const {
         jobId,
         aspectRatio = '9:16-blur',
+        targetResolution = '720p',
+        captionStyle = 'none',
+        bgMusicTrack = 'none',
+        bgMusicVolume = 0.2,
+        autoDucking = true,
         customHeadlines = {},
         clipTrims = {},
       } = req.body;
@@ -231,6 +262,11 @@ export const ShortsController = {
       const result = await ShortsService.renderAllClipsZip({
         jobId,
         aspectRatio,
+        targetResolution,
+        captionStyle,
+        bgMusicTrack,
+        bgMusicVolume: typeof bgMusicVolume === 'number' ? bgMusicVolume : parseFloat(bgMusicVolume) || 0.2,
+        autoDucking: autoDucking !== false,
         customHeadlines,
         clipTrims,
       });
@@ -257,6 +293,10 @@ export const ShortsController = {
         jobId,
         aspectRatio = '9:16-blur',
         targetResolution = '720p',
+        captionStyle = 'none',
+        bgMusicTrack = 'none',
+        bgMusicVolume = 0.2,
+        autoDucking = true,
         customHeadlines = {},
         clipTrims = {},
       } = req.body;
@@ -272,6 +312,10 @@ export const ShortsController = {
         jobId,
         aspectRatio,
         targetResolution,
+        captionStyle,
+        bgMusicTrack,
+        bgMusicVolume: typeof bgMusicVolume === 'number' ? bgMusicVolume : parseFloat(bgMusicVolume) || 0.2,
+        autoDucking: autoDucking !== false,
         customHeadlines,
         clipTrims,
       });

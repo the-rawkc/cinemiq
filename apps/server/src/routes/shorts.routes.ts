@@ -29,6 +29,9 @@ const upload = multer({
 // YouTube Metadata
 router.post('/info', ShortsController.getInfo);
 
+// Royalty-Free Copyright-Free Background Music Tracks
+router.get('/music-tracks', ShortsController.getMusicTracks);
+
 // Kick off async Download & AI Highlight Analysis Job
 router.post('/analyze', ShortsController.analyze);
 

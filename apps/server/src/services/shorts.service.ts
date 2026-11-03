@@ -19,6 +19,21 @@ export interface VideoInfo {
   categories?: string[];
 }
 
+export interface TranscriptWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+  words?: TranscriptWord[];
+}
+
+export type CaptionStyle = 'hormozi' | 'neon' | 'mrbeast' | 'karaoke' | 'minimal' | 'none';
+
 export interface ViralClip {
   id: string;
   title: string;
@@ -30,6 +45,7 @@ export interface ViralClip {
   hook: string;
   suggestedHeadline: string;
   tags: string[];
+  transcriptSegments?: TranscriptSegment[];
 }
 
 export interface DownloadProgress {
@@ -48,6 +64,7 @@ export interface ShortsJob {
   videoPath?: string;
   videoUrl?: string;
   clips?: ViralClip[];
+  transcript?: TranscriptSegment[];
   error?: string;
   downloadProgress?: DownloadProgress;
   // Timing & Telemetry
@@ -88,6 +105,123 @@ export function getUploadsDir(): string {
   return defaultDir;
 }
 
+export function getMusicDir(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'uploads', 'music'),
+    path.resolve(process.cwd(), 'apps', 'server', 'uploads', 'music'),
+    path.resolve(process.cwd(), '..', 'uploads', 'music'),
+    path.resolve(process.cwd(), '..', '..', 'uploads', 'music'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  const defaultDir = candidates[0];
+  fs.mkdirSync(defaultDir, { recursive: true });
+  return defaultDir;
+}
+
+export function getCopyrightFreeMusicTracks() {
+  ensureDefaultMusicTracks();
+  return [
+    {
+      id: 'lofi-sunset',
+      name: 'Lofi Sunset Chill',
+      genre: 'Lo-Fi / Study / Relaxed',
+      mood: 'Chill & Relaxed',
+      url: '/uploads/music/lofi-sunset.mp3',
+    },
+    {
+      id: 'energetic-hype',
+      name: 'Energetic Hype',
+      genre: 'Upbeat / Action / Electronic',
+      mood: 'Hype & Dynamic',
+      url: '/uploads/music/energetic-hype.mp3',
+    },
+    {
+      id: 'cinematic-suspense',
+      name: 'Cinematic Suspense',
+      genre: 'Dramatic / Mystery / Tension',
+      mood: 'Epic & Suspenseful',
+      url: '/uploads/music/cinematic-suspense.mp3',
+    },
+    {
+      id: 'ambient-focus',
+      name: 'Ambient Focus',
+      genre: 'Calm / Inspiring / Tech',
+      mood: 'Modern & Clean',
+      url: '/uploads/music/ambient-focus.mp3',
+    },
+    {
+      id: 'studio-beat',
+      name: 'Studio Beats',
+      genre: 'Hip Hop / Rhythmic / Urban',
+      mood: 'Punchy & Groovy',
+      url: '/uploads/music/studio-beat.mp3',
+    },
+    {
+      id: 'modern-rhythm',
+      name: 'Modern Rhythm',
+      genre: 'Pop / Upbeat / Trending',
+      mood: 'Bright & Positive',
+      url: '/uploads/music/modern-rhythm.mp3',
+    },
+    {
+      id: 'none',
+      name: 'Original Audio Only (No Music)',
+      genre: 'Clean Dialogue',
+      mood: 'Original',
+      url: '',
+    },
+  ];
+}
+
+export function ensureDefaultMusicTracks(): void {
+  const musicDir = getMusicDir();
+  if (!fs.existsSync(musicDir)) {
+    fs.mkdirSync(musicDir, { recursive: true });
+  }
+
+  const trackSpecs: Array<{ name: string; filter: string }> = [
+    {
+      name: 'lofi-sunset.mp3',
+      filter: 'sine=frequency=220:duration=60,volume=0.25,lowpass=f=1200,aphaser=in_gain=0.6:out_gain=0.7:delay=3:decay=0.4:speed=0.5',
+    },
+    {
+      name: 'energetic-hype.mp3',
+      filter: 'sine=frequency=140:duration=60,volume=0.25,firequalizer=gain=\'gain_interpolate(f, 60, 4, 250, 2, 1000, 0)\'',
+    },
+    {
+      name: 'cinematic-suspense.mp3',
+      filter: 'sine=frequency=65:duration=60,volume=0.3,lowpass=f=400,aecho=0.8:0.9:500:0.4',
+    },
+    {
+      name: 'ambient-focus.mp3',
+      filter: 'sine=frequency=330:duration=60,volume=0.2,aecho=0.8:0.88:400:0.5',
+    },
+    {
+      name: 'studio-beat.mp3',
+      filter: 'sine=frequency=120:duration=60,volume=0.28,aecho=0.8:0.7:250:0.3',
+    },
+    {
+      name: 'modern-rhythm.mp3',
+      filter: 'sine=frequency=180:duration=60,volume=0.25,aecho=0.8:0.8:300:0.35',
+    },
+  ];
+
+  for (const t of trackSpecs) {
+    const dest = path.join(musicDir, t.name);
+    if (!fs.existsSync(dest)) {
+      try {
+        spawn(
+          'ffmpeg',
+          ['-f', 'lavfi', '-i', t.filter, '-c:a', 'libmp3lame', '-b:a', '192k', '-t', '60', '-y', dest],
+          { windowsHide: true }
+        );
+      } catch {}
+    }
+  }
+}
+
 function getYtDlpBinary(): string {
   const binaryName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
   const localBin = path.resolve(process.cwd(), 'bin', binaryName);
@@ -100,32 +234,54 @@ function getYtDlpBinary(): string {
 }
 
 /**
- * Parse WebVTT subtitle file into timestamped lines
+ * Parse WebVTT subtitle file into rich timestamped segments with word-level cues
  */
-function parseVTTFile(filePath: string): Array<{ start: number; end: number; text: string }> {
+function parseVTTFile(filePath: string): TranscriptSegment[] {
   if (!fs.existsSync(filePath)) return [];
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split(/\r?\n/);
-  const segments: Array<{ start: number; end: number; text: string }> = [];
+  const segments: TranscriptSegment[] = [];
 
   const timeRegex = /(\d{2}):(\d{2}):(\d{2}\.\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}\.\d{3})/;
   const shortTimeRegex = /(\d{2}):(\d{2}\.\d{3})\s*-->\s*(\d{2}):(\d{2}\.\d{3})/;
 
   let currentStart = 0;
   let currentEnd = 0;
-  let currentText: string[] = [];
+  let currentRawLines: string[] = [];
+
+  const flushCue = () => {
+    if (currentRawLines.length === 0 || currentEnd <= currentStart) return;
+    const combined = currentRawLines.join(' ');
+    // Filter noise like [Music], [Applause]
+    const cleanText = combined.replace(/\[[^\]]*\]/g, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleanText) {
+      currentRawLines = [];
+      return;
+    }
+
+    const wordsList = cleanText.split(/\s+/).filter(Boolean);
+    const duration = Math.max(0.3, currentEnd - currentStart);
+    const wordDur = duration / Math.max(1, wordsList.length);
+
+    const words: TranscriptWord[] = wordsList.map((w, idx) => ({
+      word: w,
+      start: Math.round((currentStart + idx * wordDur) * 1000) / 1000,
+      end: Math.round((currentStart + (idx + 1) * wordDur) * 1000) / 1000,
+    }));
+
+    segments.push({
+      start: Math.round(currentStart * 1000) / 1000,
+      end: Math.round(currentEnd * 1000) / 1000,
+      text: cleanText,
+      words,
+    });
+    currentRawLines = [];
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) {
-      if (currentText.length > 0) {
-        segments.push({
-          start: currentStart,
-          end: currentEnd,
-          text: currentText.join(' ').replace(/<[^>]*>/g, '').trim(),
-        });
-        currentText = [];
-      }
+      flushCue();
       continue;
     }
 
@@ -133,41 +289,182 @@ function parseVTTFile(filePath: string): Array<{ start: number; end: number; tex
     const matchShort = line.match(shortTimeRegex);
 
     if (matchLong) {
-      if (currentText.length > 0) {
-        segments.push({
-          start: currentStart,
-          end: currentEnd,
-          text: currentText.join(' ').replace(/<[^>]*>/g, '').trim(),
-        });
-        currentText = [];
-      }
+      flushCue();
       currentStart = parseInt(matchLong[1], 10) * 3600 + parseInt(matchLong[2], 10) * 60 + parseFloat(matchLong[3]);
       currentEnd = parseInt(matchLong[4], 10) * 3600 + parseInt(matchLong[5], 10) * 60 + parseFloat(matchLong[6]);
     } else if (matchShort) {
-      if (currentText.length > 0) {
-        segments.push({
-          start: currentStart,
-          end: currentEnd,
-          text: currentText.join(' ').replace(/<[^>]*>/g, '').trim(),
-        });
-        currentText = [];
-      }
+      flushCue();
       currentStart = parseInt(matchShort[1], 10) * 60 + parseFloat(matchShort[2]);
       currentEnd = parseInt(matchShort[3], 10) * 60 + parseFloat(matchShort[4]);
     } else if (currentEnd > 0 && !line.startsWith('WEBVTT') && !line.startsWith('Kind:') && !line.startsWith('Language:')) {
-      currentText.push(line);
+      currentRawLines.push(line);
+    }
+  }
+  flushCue();
+
+  // Deduplicate rolling YouTube auto-sub repetitions
+  const deduped: TranscriptSegment[] = [];
+  for (const s of segments) {
+    if (deduped.length > 0) {
+      const prev = deduped[deduped.length - 1];
+      if (prev.text.toLowerCase() === s.text.toLowerCase() && Math.abs(prev.end - s.start) < 0.5) {
+        prev.end = Math.max(prev.end, s.end);
+        continue;
+      }
+    }
+    deduped.push(s);
+  }
+
+  return deduped;
+}
+
+function formatAssTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const cs = Math.floor((seconds % 1) * 100);
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+/**
+ * Generate kinetic ASS subtitle file for FFmpeg burning
+ */
+export function generateAssSubtitles(params: {
+  segments: TranscriptSegment[];
+  clipStartTime: number;
+  clipEndTime: number;
+  style: CaptionStyle;
+  targetResolution?: '720p' | '1080p';
+  uploadsDir: string;
+}): string | null {
+  const { segments, clipStartTime, clipEndTime, style, targetResolution, uploadsDir } = params;
+  if (!style || style === 'none' || !segments || segments.length === 0) return null;
+
+  const is1080p = targetResolution === '1080p';
+  const playResX = is1080p ? 1080 : 720;
+  const playResY = is1080p ? 1920 : 1280;
+
+  let fontSize = is1080p ? 54 : 38;
+  const fontName = 'Arial';
+  let primaryColor = '&H00FFFFFF&';
+  let secondaryColor = '&H001FE8FF&'; // Yellow active in ASS BGR
+  const outlineColor = '&H00000000&';
+  const backColor = '&H80000000&';
+  let bold = -1; // -1 = bold true
+  let outline = is1080p ? 6 : 4.5;
+  let shadow = is1080p ? 3 : 2;
+  const marginV = is1080p ? 320 : 220; // Lower center vertical safe area
+
+  if (style === 'hormozi') {
+    fontSize = is1080p ? 58 : 42;
+    primaryColor = '&H00FFFFFF&';
+    secondaryColor = '&H001FE8FF&'; // Hormozi Yellow Pop
+    outline = is1080p ? 7 : 5;
+  } else if (style === 'neon') {
+    fontSize = is1080p ? 56 : 40;
+    primaryColor = '&H00FFFFFF&';
+    secondaryColor = '&H00FFFF00&'; // Electric Cyan
+    outline = is1080p ? 6 : 4.5;
+  } else if (style === 'mrbeast') {
+    fontSize = is1080p ? 62 : 44;
+    primaryColor = '&H00FFFFFF&';
+    secondaryColor = '&H0014FF39&'; // Bright Lime Green
+    outline = is1080p ? 8 : 5.5;
+  } else if (style === 'karaoke') {
+    fontSize = is1080p ? 54 : 38;
+    primaryColor = '&H00B0B0B0&';
+    secondaryColor = '&H001FE8FF&';
+  } else if (style === 'minimal') {
+    fontSize = is1080p ? 42 : 30;
+    primaryColor = '&H00FFFFFF&';
+    secondaryColor = '&H00FFFFFF&';
+    outline = 2;
+    shadow = 1;
+    bold = 0;
+  }
+
+  const assHeader = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${playResX}`,
+    `PlayResY: ${playResY}`,
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Kinetic,${fontName},${fontSize},${primaryColor},${secondaryColor},${outlineColor},${backColor},${bold},0,0,0,100,100,1,0,1,${outline},${shadow},2,30,30,${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ].join('\n');
+
+  // Filter segments falling inside the clip range
+  const clipSegs = segments.filter((s) => s.end > clipStartTime && s.start < clipEndTime);
+  if (clipSegs.length === 0) return null;
+
+  const events: string[] = [];
+
+  for (const seg of clipSegs) {
+    const segStartRel = Math.max(0, seg.start - clipStartTime);
+    const segEndRel = Math.max(segStartRel + 0.3, seg.end - clipStartTime);
+    const words = seg.words || [];
+
+    if (words.length === 0) {
+      const cleanText = seg.text.replace(/[{}]/g, '').toUpperCase();
+      events.push(`Dialogue: 0,${formatAssTime(segStartRel)},${formatAssTime(segEndRel)},Kinetic,,0,0,0,,${cleanText}`);
+      continue;
+    }
+
+    if (style === 'karaoke') {
+      const kParts = words.map((w) => {
+        const durCs = Math.max(5, Math.round((w.end - w.start) * 100));
+        return `{\\k${durCs}}${w.word.toUpperCase()} `;
+      });
+      events.push(`Dialogue: 0,${formatAssTime(segStartRel)},${formatAssTime(segEndRel)},Kinetic,,0,0,0,,${kParts.join('').trim()}`);
+    } else {
+      // Kinetic Word-by-Word Highlight Pop in 3-4 word clusters
+      const clusterSize = 4;
+      for (let i = 0; i < words.length; i += clusterSize) {
+        const cluster = words.slice(i, i + clusterSize);
+        const clusterStart = Math.max(0, cluster[0].start - clipStartTime);
+        const clusterEnd = Math.max(clusterStart + 0.4, cluster[cluster.length - 1].end - clipStartTime);
+
+        for (let activeIdx = 0; activeIdx < cluster.length; activeIdx++) {
+          const activeWord = cluster[activeIdx];
+          const wordStartRel = Math.max(clusterStart, activeWord.start - clipStartTime);
+          const wordEndRel = Math.min(clusterEnd, Math.max(wordStartRel + 0.15, activeWord.end - clipStartTime));
+
+          const activeColorTag =
+            style === 'neon'
+              ? '\\c&H00FFFF00&'
+              : style === 'mrbeast'
+              ? '\\c&H0014FF39&'
+              : '\\c&H001FE8FF&';
+
+          const formattedCluster = cluster
+            .map((w, idx) => {
+              const wText = w.word.replace(/[{}]/g, '').toUpperCase();
+              if (idx === activeIdx) {
+                return `{\\fscx112\\fscy112${activeColorTag}}${wText}{\\fscx100\\fscy100\\c${primaryColor}}`;
+              }
+              return wText;
+            })
+            .join(' ');
+
+          events.push(`Dialogue: 0,${formatAssTime(wordStartRel)},${formatAssTime(wordEndRel)},Kinetic,,0,0,0,,${formattedCluster}`);
+        }
+      }
     }
   }
 
-  if (currentText.length > 0) {
-    segments.push({
-      start: currentStart,
-      end: currentEnd,
-      text: currentText.join(' ').replace(/<[^>]*>/g, '').trim(),
-    });
-  }
+  if (events.length === 0) return null;
 
-  return segments.filter((s) => s.text.length > 0);
+  const assContent = `${assHeader}\n${events.join('\n')}\n`;
+  const assFilename = `sub-${crypto.randomBytes(6).toString('hex')}.ass`;
+  const assPath = path.join(uploadsDir, assFilename);
+  fs.writeFileSync(assPath, assContent, 'utf-8');
+
+  return assPath;
 }
 
 function extractYouTubeId(url: string): string | null {
@@ -440,6 +737,94 @@ export const ShortsService = {
   },
 
   /**
+   * Fetch subtitles for a YouTube URL or retrieve cached transcript
+   */
+  async fetchSubtitles(url: string, sanitizedId: string): Promise<TranscriptSegment[]> {
+    const uploadsDir = getUploadsDir();
+    const cacheFile = path.join(uploadsDir, `yt-${sanitizedId}.transcript.json`);
+
+    // 1. Instant local disk cache check
+    if (fs.existsSync(cacheFile)) {
+      try {
+        const raw = fs.readFileSync(cacheFile, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log(`⚡ [Shorts] Instant transcript cache hit: ${parsed.length} segments`);
+          return parsed;
+        }
+      } catch {}
+    }
+
+    // 2. Also check if a .vtt file already exists on disk
+    const existingVtt = fs.readdirSync(uploadsDir).find((f) => f.startsWith(`yt-${sanitizedId}`) && f.endsWith('.vtt'));
+    if (existingVtt) {
+      try {
+        const segs = parseVTTFile(path.join(uploadsDir, existingVtt));
+        if (segs.length > 0) {
+          fs.writeFileSync(cacheFile, JSON.stringify(segs, null, 2));
+          return segs;
+        }
+      } catch {}
+    }
+
+    // 3. Download subtitles using yt-dlp with strict 5s timeout
+    try {
+      const vttTemplate = path.join(uploadsDir, `yt-${sanitizedId}.%(ext)s`);
+      const args = [
+        '--js-runtimes',
+        'node',
+        '--skip-download',
+        '--write-auto-subs',
+        '--write-subs',
+        '--sub-langs',
+        'en.*,en,hi.*',
+        '--sub-format',
+        'vtt',
+        '--no-playlist',
+        '--no-warnings',
+        '-o',
+        vttTemplate,
+        url,
+      ];
+
+      await new Promise<void>((resolve) => {
+        const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
+        const timer = setTimeout(() => {
+          try {
+            proc.kill();
+          } catch {}
+          resolve();
+        }, 5000);
+
+        proc.on('close', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        proc.on('error', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+      const foundVtt = fs.readdirSync(uploadsDir).find((f) => f.startsWith(`yt-${sanitizedId}`) && f.endsWith('.vtt'));
+      if (foundVtt) {
+        const segs = parseVTTFile(path.join(uploadsDir, foundVtt));
+        if (segs.length > 0) {
+          try {
+            fs.writeFileSync(cacheFile, JSON.stringify(segs, null, 2));
+          } catch {}
+          console.log(`📝 [Shorts Subtitles] Successfully extracted ${segs.length} timestamped lines!`);
+          return segs;
+        }
+      }
+    } catch (err: any) {
+      console.warn('⚠️ Subtitle fetch skipped/failed:', err.message);
+    }
+
+    return [];
+  },
+
+  /**
    * Background processor: Downloads video + subtitles in a single unified pass,
    * extracts metadata and subtitles without triggering YouTube 429 rate limits,
    * and analyzes for viral hooks.
@@ -480,13 +865,28 @@ export const ShortsService = {
       job.hashtags = this.generateHashtags(videoInfo);
     }
 
-    // 2. Generate AI clips immediately so user sees viral highlights in ~2 seconds!
-    job.progress = 25;
-    job.stage = 'Scanning timeline & detecting high-retention viral moments...';
+    // 2. Fetch subtitles & transcript for sentence-accurate meaningful clips and kinetic lyrics
+    job.progress = 20;
+    job.stage = 'Extracting speech subtitles & dialogue sentences...';
+
+    const sanitizedId = (videoInfo.id || jobId).replace(/[^a-zA-Z0-9_\-]/g, '');
+    let transcript: TranscriptSegment[] = [];
+    try {
+      transcript = await this.fetchSubtitles(url, sanitizedId);
+      job.transcript = transcript;
+    } catch (err: any) {
+      console.warn('Subtitle extraction note:', err.message);
+    }
+
+    // 3. Generate AI clips with sentence-snapped meaningful thoughts
+    job.progress = 30;
+    job.stage = transcript.length > 0
+      ? `Analyzing ${transcript.length} speech dialogue lines for viral hooks...`
+      : 'Scanning timeline & detecting high-retention viral moments...';
 
     const earlyClips = await this.detectViralMoments(
       videoInfo,
-      [],
+      transcript,
       clipCount,
       targetDuration
     );
@@ -497,7 +897,6 @@ export const ShortsService = {
     job.stage = `Identified ${earlyClips.length} viral highlights! Checking stream cache...`;
 
     // Check if we already have this video stream downloaded on disk (Instant 0s Local Cache)
-    const sanitizedId = (videoInfo.id || jobId).replace(/[^a-zA-Z0-9_\-]/g, '');
     const currentFiles = fs.readdirSync(uploadsDir);
     let cachedVideo = currentFiles.find((f) => {
       const isMatch = f === `yt-${sanitizedId}.mp4` || (f.includes(sanitizedId) && (f.endsWith('.mp4') || f.endsWith('.webm')));
@@ -673,11 +1072,11 @@ export const ShortsService = {
   },
 
   /**
-   * AI Analysis using OpenAI GPT or intelligent algorithmic fallback
+   * AI Analysis using OpenAI GPT or intelligent algorithmic sentence-snapped fallback
    */
   async detectViralMoments(
     info: VideoInfo,
-    transcript: Array<{ start: number; end: number; text: string }>,
+    transcript: TranscriptSegment[],
     clipCount: number = 4,
     targetDuration: 'auto' | '15-30' | '30-60' = 'auto'
   ): Promise<ViralClip[]> {
@@ -699,7 +1098,6 @@ export const ShortsService = {
     if (openai && transcript.length > 5) {
       try {
         console.log(`🤖 [Shorts AI] Querying OpenAI for ${clipCount} viral clips across duration ${duration}s...`);
-        // Evenly sample transcript if long so it spans the entire 60 minutes
         let sampledTranscript = transcript;
         if (transcript.length > 300) {
           const step = Math.ceil(transcript.length / 300);
@@ -730,7 +1128,7 @@ Respond strictly with valid JSON conforming to this schema:
 {
   "clips": [
     {
-      "title": "Short catchy title with emoji",
+      "title": "Catchy title with emoji",
       "startTime": 12.5,
       "endTime": 42.0,
       "viralityScore": 96,
@@ -756,24 +1154,30 @@ ${transcriptText}`;
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed.clips) && parsed.clips.length > 0) {
-            const aiClips = parsed.clips.map((c: any, index: number) => ({
-              id: `clip-${index + 1}-${Math.random().toString(36).substring(2, 6)}`,
-              title: c.title || `Viral Highlight #${index + 1}`,
-              startTime: Math.max(0, parseFloat(c.startTime) || 0),
-              endTime: Math.min(duration, parseFloat(c.endTime) || minLen),
-              duration: Math.max(10, (parseFloat(c.endTime) || minLen) - (parseFloat(c.startTime) || 0)),
-              viralityScore: c.viralityScore || Math.floor(88 + Math.random() * 10),
-              reason: c.reason || 'High emotional hook and retention curve.',
-              hook: c.hook || 'Opening hook from speech',
-              suggestedHeadline: c.suggestedHeadline || c.title?.toUpperCase() || 'DON\'T MISS THIS ⚡',
-              tags: Array.isArray(c.tags) ? c.tags : ['#shorts', '#viral'],
-            }));
+            const aiClips = parsed.clips.map((c: any, index: number) => {
+              const start = Math.max(0, parseFloat(c.startTime) || 0);
+              const end = Math.min(duration, parseFloat(c.endTime) || minLen);
+              const clipSegs = transcript.filter((s) => s.end > start && s.start < end);
+
+              return {
+                id: `clip-${index + 1}-${Math.random().toString(36).substring(2, 6)}`,
+                title: c.title || `Viral Highlight #${index + 1}`,
+                startTime: Math.round(start * 10) / 10,
+                endTime: Math.round(end * 10) / 10,
+                duration: Math.round(Math.max(10, end - start) * 10) / 10,
+                viralityScore: c.viralityScore || Math.floor(88 + Math.random() * 10),
+                reason: c.reason || 'High emotional hook and retention curve.',
+                hook: c.hook || (clipSegs[0]?.text ? `"${clipSegs[0].text}..."` : 'Opening hook from speech'),
+                suggestedHeadline: c.suggestedHeadline || c.title?.toUpperCase() || "DON'T MISS THIS ⚡",
+                tags: Array.isArray(c.tags) ? c.tags : ['#shorts', '#viral'],
+                transcriptSegments: clipSegs,
+              };
+            });
 
             if (aiClips.length >= clipCount) {
               return aiClips.slice(0, clipCount);
             }
 
-            // Fill remainder with algorithmic timeline distribution
             const algorithmicFill = this.generateAlgorithmicClips(info, transcript, clipCount, minLen, maxLen);
             const combined = [...aiClips, ...algorithmicFill.slice(aiClips.length)];
             return combined.slice(0, clipCount);
@@ -784,18 +1188,19 @@ ${transcriptText}`;
       }
     }
 
-    // Heuristic & Timeline-distributed Highlight Partitioner
-    console.log(`⚡ [Shorts AI] Generating ${clipCount} viral clips across ${duration}s using timeline partitioner...`);
+    // Meaningful sentence-snapped algorithmic highlight partitioner
+    console.log(`⚡ [Shorts AI] Generating ${clipCount} viral clips across ${duration}s using sentence-snapped partitioner...`);
     return this.generateAlgorithmicClips(info, transcript, clipCount, minLen, maxLen);
   },
 
   /**
-   * Algorithmic highlight detector: extracts optimal engaging segments across entire duration
-   * Specially calibrated for 10min to 60+ min videos generating up to 100+ clips
+   * Algorithmic highlight detector: extracts meaningful, complete thought segments
+   * Snaps startTime to sentence openings and endTime to terminal punctuation (.?!)
+   * Attaches word-level timestamp cues for kinetic lyric motion graphics
    */
   generateAlgorithmicClips(
     info: VideoInfo,
-    transcript: Array<{ start: number; end: number; text: string }>,
+    transcript: TranscriptSegment[],
     count: number,
     minLen: number,
     maxLen: number
@@ -803,7 +1208,6 @@ ${transcriptText}`;
     const totalDuration = info.duration > 0 ? info.duration : 120;
     const clips: ViralClip[] = [];
 
-    // Comprehensive 25-Archetype Viral Library covering all stages of a long video
     const archetypes = [
       {
         titleSuffix: 'The Cold Opening Hook 💥',
@@ -958,8 +1362,6 @@ ${transcriptText}`;
     ];
 
     const safeCount = Math.max(1, Math.min(count, 150));
-
-    // Calculate intelligent chronological distribution across the video duration
     const startMargin = Math.min(15, totalDuration * 0.02);
     const usableDuration = Math.max(10, totalDuration - startMargin - minLen);
     const intervalStep = safeCount > 1 ? usableDuration / (safeCount - 1) : 0;
@@ -971,18 +1373,84 @@ ${transcriptText}`;
 
       const targetLength = Math.min(maxLen, Math.max(minLen, 24 + ((i * 5) % 25)));
 
-      // Step along timeline
-      let start = Math.round(startMargin + i * intervalStep);
-      if (start + targetLength > totalDuration) {
-        start = Math.max(0, totalDuration - targetLength);
+      let rawStart = Math.round(startMargin + i * intervalStep);
+      if (rawStart + targetLength > totalDuration) {
+        rawStart = Math.max(0, totalDuration - targetLength);
       }
-      const end = Math.min(totalDuration, start + targetLength);
+      let rawEnd = Math.min(totalDuration, rawStart + targetLength);
 
-      // Search for nearby transcript speech to give a real hook if available
+      let snappedStart = rawStart;
+      let snappedEnd = rawEnd;
+      let clipSegments: TranscriptSegment[] = [];
+
+      // Meaningful Slicing: Snap to natural sentence beginnings and ends
+      if (transcript && transcript.length > 0) {
+        // Find segment starting closest to rawStart with sentence start preference
+        const nearbyStarts = transcript.filter((t) => Math.abs(t.start - rawStart) <= 8);
+        if (nearbyStarts.length > 0) {
+          // Prefer capitalized segment or one preceded by a sentence terminal (.?!) or pause
+          const bestStart =
+            nearbyStarts.find((s, idx) => {
+              if (idx > 0) {
+                const prev = nearbyStarts[idx - 1];
+                if (/[.?!]$/.test(prev.text.trim()) || s.start - prev.end > 1.0) return true;
+              }
+              return /^[A-Z]/.test(s.text.trim());
+            }) || nearbyStarts[0];
+          snappedStart = Math.max(0, bestStart.start);
+        }
+
+        // Find segment ending closest to rawEnd with sentence end preference (.?!)
+        const minTargetEnd = snappedStart + minLen;
+        const maxTargetEnd = Math.min(totalDuration, snappedStart + maxLen);
+        const nearbyEnds = transcript.filter((t) => t.end >= minTargetEnd && t.end <= maxTargetEnd + 5);
+
+        if (nearbyEnds.length > 0) {
+          const bestEnd =
+            nearbyEnds.find((s) => /[.?!]$/.test(s.text.trim())) ||
+            nearbyEnds[nearbyEnds.length - 1];
+          snappedEnd = Math.min(totalDuration, bestEnd.end);
+        } else {
+          snappedEnd = Math.min(totalDuration, snappedStart + targetLength);
+        }
+
+        clipSegments = transcript.filter((t) => t.start >= snappedStart && t.end <= snappedEnd);
+      }
+
+      // If no speech segments exist (e.g. music video), synthesize rhythmic lyrical cues
+      if (clipSegments.length === 0) {
+        const headlineWords = `${template.headline} • ${(info.title || 'CINEMIQ').toUpperCase()}`.split(/\s+/).filter(Boolean);
+        const synthDur = Math.max(10, snappedEnd - snappedStart);
+        const chunkCount = Math.max(2, Math.floor(synthDur / 4));
+        const wordsPerChunk = Math.max(3, Math.ceil(headlineWords.length / chunkCount));
+
+        for (let cIdx = 0; cIdx < chunkCount; cIdx++) {
+          const cStart = Math.round((snappedStart + (cIdx * (synthDur / chunkCount))) * 100) / 100;
+          const cEnd = Math.round((cStart + (synthDur / chunkCount) * 0.9) * 100) / 100;
+          const cSlice = headlineWords.slice(
+            (cIdx * wordsPerChunk) % headlineWords.length,
+            ((cIdx + 1) * wordsPerChunk) % headlineWords.length || headlineWords.length
+          );
+          if (cSlice.length === 0) continue;
+
+          const wDur = (cEnd - cStart) / cSlice.length;
+          clipSegments.push({
+            start: cStart,
+            end: cEnd,
+            text: cSlice.join(' '),
+            words: cSlice.map((w, wIdx) => ({
+              word: w,
+              start: Math.round((cStart + wIdx * wDur) * 100) / 100,
+              end: Math.round((cStart + (wIdx + 1) * wDur) * 100) / 100,
+            })),
+          });
+        }
+      }
+
+      // Extract opening hook from the first spoken sentence
       let hook = 'Listen closely to what happens right here...';
-      const speechNearby = transcript.filter((t) => t.start >= start && t.start <= end);
-      if (speechNearby.length > 0) {
-        hook = `"${speechNearby[0].text}..."`;
+      if (clipSegments.length > 0 && clipSegments[0].text) {
+        hook = `"${clipSegments[0].text}..."`;
       }
 
       const baseTitle = info.title && info.title !== 'YouTube Video' ? info.title.substring(0, 32) : 'Highlight';
@@ -990,14 +1458,15 @@ ${transcriptText}`;
       clips.push({
         id: `clip-${i + 1}-${Math.random().toString(36).substring(2, 6)}`,
         title: `${baseTitle} - ${template.titleSuffix}${partSuffix}`,
-        startTime: Math.round(start * 10) / 10,
-        endTime: Math.round(end * 10) / 10,
-        duration: Math.round((end - start) * 10) / 10,
+        startTime: Math.round(snappedStart * 10) / 10,
+        endTime: Math.round(snappedEnd * 10) / 10,
+        duration: Math.round((snappedEnd - snappedStart) * 10) / 10,
         viralityScore: Math.max(78, template.score - Math.floor((i % archetypes.length) * 0.3) - (cycle * 2)),
         reason: template.reason,
         hook,
         suggestedHeadline: `${template.headline}${cycle > 0 ? ` #${i + 1}` : ''}`,
         tags: ['#shorts', '#viral', '#trending', '#highlights', '#podcast'],
+        transcriptSegments: clipSegments,
       });
     }
 
@@ -1006,8 +1475,9 @@ ${transcriptText}`;
 
   /**
    * Render a customized short clip using FFmpeg
-   * Supports: 9:16 Blurred Background, 9:16 Center Crop, 16:9 Fit, and Text Overlay
-   * Optimized for ultrafast rendering (720x1280 default renders in ~2s, 1080x1920 available)
+   * Supports: 9:16 Blurred Background, 9:16 Center Crop, 16:9 Fit, Headline Text Overlay,
+   * Kinetic Motion Graphic Subtitles (Hormozi, Neon, MrBeast, Karaoke, Minimal),
+   * and Copyright-Free Background Music with Sidechain Auto-Ducking!
    */
   async renderShortClip(params: {
     sourceVideoPath: string;
@@ -1016,8 +1486,24 @@ ${transcriptText}`;
     aspectRatio: '9:16-blur' | '9:16-crop' | '16:9-fit' | 'original';
     headlineText?: string;
     targetResolution?: '720p' | '1080p';
+    captionStyle?: CaptionStyle;
+    transcriptSegments?: TranscriptSegment[];
+    bgMusicTrack?: string;
+    bgMusicVolume?: number;
+    autoDucking?: boolean;
   }): Promise<{ url: string; duration: number; filePath: string }> {
-    const { sourceVideoPath, startTime, endTime, aspectRatio, headlineText } = params;
+    const {
+      sourceVideoPath,
+      startTime,
+      endTime,
+      aspectRatio,
+      headlineText,
+      captionStyle = 'none',
+      transcriptSegments = [],
+      bgMusicTrack = 'none',
+      bgMusicVolume = 0.2,
+      autoDucking = true,
+    } = params;
 
     if (!fs.existsSync(sourceVideoPath)) {
       throw new Error(`Source video not found on disk: ${sourceVideoPath}`);
@@ -1029,7 +1515,6 @@ ${transcriptText}`;
     const is1080p = params.targetResolution === '1080p';
     const targetW = is1080p ? 1080 : 720;
     const targetH = is1080p ? 1920 : 1280;
-    // Ambient blur downscale surface: 90x160 (1080p) or 72x128 (720p) for exact 9:16 aspect ratio
     const bgScale = is1080p ? '90:160' : '72:128';
     const fontSize = is1080p ? 48 : 34;
     const textY = is1080p ? 240 : 160;
@@ -1042,8 +1527,6 @@ ${transcriptText}`;
       fontArg = ":fontfile='C\\:/Windows/Fonts/arial.ttf'";
     }
 
-    // Build filter complex based on aspect ratio
-    let filterComplex = '';
     const cleanHeadline = (headlineText || '')
       .replace(/'/g, "\\'")
       .replace(/:/g, '\\:')
@@ -1052,7 +1535,7 @@ ${transcriptText}`;
       .trim();
 
     // Check fast render cache in memory
-    const cacheKey = `${sourceVideoPath}_${startTime}_${endTime}_${aspectRatio}_${cleanHeadline}_${params.targetResolution || '720p'}`;
+    const cacheKey = `${sourceVideoPath}_${startTime}_${endTime}_${aspectRatio}_${cleanHeadline}_${params.targetResolution || '720p'}_${captionStyle}_${bgMusicTrack}_${bgMusicVolume}_${autoDucking}`;
     const cached = renderCache.get(cacheKey);
     if (cached && fs.existsSync(cached.filePath)) {
       return cached;
@@ -1078,50 +1561,109 @@ ${transcriptText}`;
       } catch {}
     }
 
+    // Generate kinetic ASS subtitle file if caption style requested
+    let assFilePath: string | null = null;
+    if (captionStyle && captionStyle !== 'none' && transcriptSegments && transcriptSegments.length > 0) {
+      assFilePath = generateAssSubtitles({
+        segments: transcriptSegments,
+        clipStartTime: startTime,
+        clipEndTime: endTime,
+        style: captionStyle,
+        targetResolution: params.targetResolution,
+        uploadsDir,
+      });
+    }
+
+    // Check background music file
+    let hasBgMusic = false;
+    let musicFilePath = '';
+    if (bgMusicTrack && bgMusicTrack !== 'none') {
+      const candidates = [
+        path.join(getMusicDir(), `${bgMusicTrack}.mp3`),
+        path.join(getUploadsDir(), 'music', `${bgMusicTrack}.mp3`),
+        path.resolve(process.cwd(), 'uploads', 'music', `${bgMusicTrack}.mp3`),
+      ];
+      for (const c of candidates) {
+        if (fs.existsSync(c)) {
+          musicFilePath = c;
+          hasBgMusic = true;
+          break;
+        }
+      }
+    }
+
+    // Build video filter graph
+    let filterComplex = '';
     if (aspectRatio === '9:16-blur') {
-      // 9:16 vertical fast-bilinear blurred background + crisp centered foreground
       filterComplex =
         '[0:v]split=2[in1][in2];' +
         `[in1]scale=${bgScale}:flags=fast_bilinear:force_original_aspect_ratio=increase,crop=${bgScale},boxblur=3:1,scale=${targetW}:${targetH}:flags=fast_bilinear[bg];` +
         `[in2]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=fast_bilinear[fg];` +
-        '[bg][fg]overlay=(W-w)/2:(H-h)/2:eval=init[base]';
-      
-      if (cleanHeadline) {
-        filterComplex += `;[base]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v]`;
-      } else {
-        filterComplex += ';[base]null[v]';
-      }
+        '[bg][fg]overlay=(W-w)/2:(H-h)/2:eval=init[v_framed]';
     } else if (aspectRatio === '9:16-crop') {
-      // Center crop filling 9:16
-      filterComplex = `[0:v]crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=${targetW}:${targetH}:flags=fast_bilinear[base]`;
-      if (cleanHeadline) {
-        filterComplex += `;[base]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v]`;
-      } else {
-        filterComplex += ';[base]null[v]';
-      }
+      filterComplex = `[0:v]crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=${targetW}:${targetH}:flags=fast_bilinear[v_framed]`;
     } else if (aspectRatio === '16:9-fit') {
-      // 9:16 Canvas with black bars
-      filterComplex = `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=fast_bilinear,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:black[base]`;
-      if (cleanHeadline) {
-        filterComplex += `;[base]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v]`;
-      } else {
-        filterComplex += ';[base]null[v]';
-      }
+      filterComplex = `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=fast_bilinear,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:black[v_framed]`;
     } else {
-      // Original aspect ratio
-      if (cleanHeadline) {
-        filterComplex = `[0:v]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=32:box=1:boxcolor=black@0.65:boxborderw=14:x=(w-text_w)/2:y=40[v]`;
+      filterComplex = '[0:v]null[v_framed]';
+    }
+
+    // Add Headline Banner
+    if (cleanHeadline) {
+      filterComplex += `;[v_framed]drawtext=text='${cleanHeadline}'${fontArg}:fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.65:boxborderw=16:x=(w-text_w)/2:y=${textY}[v_titled]`;
+    } else {
+      filterComplex += ';[v_framed]null[v_titled]';
+    }
+
+    // Add Kinetic Subtitles via libass
+    if (assFilePath && fs.existsSync(assFilePath)) {
+      const escapedAss = assFilePath.replace(/\\/g, '/').replace(/:/g, '\\:');
+      filterComplex += `;[v_titled]subtitles='${escapedAss}'[v]`;
+    } else {
+      filterComplex += ';[v_titled]null[v]';
+    }
+
+    // Build audio filter graph if background music is requested
+    const effectiveMusicVol = Math.max(0.01, Math.min(1, bgMusicVolume || 0.2));
+    if (hasBgMusic) {
+      if (autoDucking) {
+        // Dialogue in [0:a] triggers sidechain compression on background music [1:a]
+        filterComplex +=
+          `;[1:a]aloop=loop=-1:size=2e+09,volume=${effectiveMusicVol}[bgm];` +
+          '[bgm][0:a]sidechaincompress=threshold=0.08:ratio=4:attack=20:release=350[ducked_bgm];' +
+          '[0:a][ducked_bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]';
       } else {
-        filterComplex = '[0:v]null[v]';
+        filterComplex +=
+          `;[1:a]aloop=loop=-1:size=2e+09,volume=${effectiveMusicVol}[bgm];` +
+          '[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]';
       }
     }
 
     return new Promise((resolve, reject) => {
       const cmd = ffmpeg()
         .input(sourceVideoPath)
-        .inputOptions([`-ss ${startTime}`])
-        .complexFilter(filterComplex, ['v'])
-        .outputOptions([
+        .inputOptions([`-ss ${startTime}`]);
+
+      if (hasBgMusic) {
+        cmd.input(musicFilePath);
+        cmd.complexFilter(filterComplex, ['v', 'aout']);
+        cmd.outputOptions([
+          `-t ${duration}`,
+          '-c:v libx264',
+          '-preset ultrafast',
+          '-crf 23',
+          '-tune fastdecode',
+          '-x264-params no-scenecut=1:ref=1:me=dia:subme=0:b-adapt=0',
+          '-threads 0',
+          '-c:a aac',
+          '-b:a 128k',
+          '-ar 44100',
+          '-pix_fmt yuv420p',
+          '-movflags +faststart',
+        ]);
+      } else {
+        cmd.complexFilter(filterComplex, ['v']);
+        cmd.outputOptions([
           `-t ${duration}`,
           '-map 0:a?',
           '-c:v libx264',
@@ -1135,10 +1677,19 @@ ${transcriptText}`;
           '-ar 44100',
           '-pix_fmt yuv420p',
           '-movflags +faststart',
-        ])
-        .output(outputPath);
+        ]);
+      }
+
+      cmd.output(outputPath);
 
       cmd.on('end', () => {
+        // Clean up temporary ASS file
+        if (assFilePath && fs.existsSync(assFilePath)) {
+          try {
+            fs.unlinkSync(assFilePath);
+          } catch {}
+        }
+
         const result = {
           url: `/uploads/shorts/${outputFilename}`,
           duration,
@@ -1149,10 +1700,16 @@ ${transcriptText}`;
       });
 
       cmd.on('error', (err, stdout, stderr) => {
+        if (assFilePath && fs.existsSync(assFilePath)) {
+          try {
+            fs.unlinkSync(assFilePath);
+          } catch {}
+        }
         console.error('FFmpeg Shorts Render Error:', err.message, stderr);
         reject(new Error(`Rendering failed: ${err.message}`));
       });
 
+      console.log('FFmpeg Arguments:', (cmd as any)._getArguments());
       cmd.run();
     });
   },
@@ -1221,6 +1778,10 @@ ${transcriptText}`;
     jobId: string;
     aspectRatio?: '9:16-blur' | '9:16-crop' | '16:9-fit' | 'original';
     targetResolution?: '720p' | '1080p';
+    captionStyle?: CaptionStyle;
+    bgMusicTrack?: string;
+    bgMusicVolume?: number;
+    autoDucking?: boolean;
     customHeadlines?: Record<string, string>;
     clipTrims?: Record<string, { start: number; end: number }>;
   }): Promise<{ zipUrl: string; totalClips: number; zipFilename: string }> {
@@ -1272,6 +1833,11 @@ ${transcriptText}`;
             aspectRatio,
             headlineText,
             targetResolution: params.targetResolution,
+            captionStyle: params.captionStyle,
+            transcriptSegments: clip.transcriptSegments || job.transcript || [],
+            bgMusicTrack: params.bgMusicTrack,
+            bgMusicVolume: params.bgMusicVolume,
+            autoDucking: params.autoDucking,
           });
 
           return {
@@ -1348,6 +1914,10 @@ ${transcriptText}`;
     jobId: string;
     aspectRatio?: '9:16-blur' | '9:16-crop' | '16:9-fit' | 'original';
     targetResolution?: '720p' | '1080p';
+    captionStyle?: CaptionStyle;
+    bgMusicTrack?: string;
+    bgMusicVolume?: number;
+    autoDucking?: boolean;
     customHeadlines?: Record<string, string>;
     clipTrims?: Record<string, { start: number; end: number }>;
   }): Promise<{
@@ -1401,6 +1971,11 @@ ${transcriptText}`;
             aspectRatio,
             headlineText,
             targetResolution: params.targetResolution,
+            captionStyle: params.captionStyle,
+            transcriptSegments: clip.transcriptSegments || job.transcript || [],
+            bgMusicTrack: params.bgMusicTrack,
+            bgMusicVolume: params.bgMusicVolume,
+            autoDucking: params.autoDucking,
           });
 
           const cleanClip = (clip.title || `Clip ${clipIndex + 1}`)
