@@ -235,6 +235,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [exportedClips, setExportedClips] = useState<Array<{ title: string; filename: string; url: string; duration: number }>>([]);
 
   // Video Preview & Player Controls State
+  const resultsRef = useRef<HTMLDivElement | null>(null);
   const phoneRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -263,12 +264,27 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const clipDuration = Math.max(0.1, currentEnd - currentStart);
   const currentProgressSec = Math.max(0, Math.min(clipDuration, currentPlayTime - currentStart));
 
-  // Select first clip when clips arrive
+  // Resolved thumbnail helper to guarantee preview visibility
+  const ytId =
+    job?.videoInfo?.id && job.videoInfo.id !== 'unknown' && job.videoInfo.id.length === 11
+      ? job.videoInfo.id
+      : null;
+  const resolvedThumbnail =
+    job?.videoInfo?.thumbnail ||
+    (ytId ? `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg` : '');
+
+  // Select first clip & bring preview studio immediately into view when clips arrive
   useEffect(() => {
     if (clips.length > 0 && !selectedClipId) {
       setSelectedClipId(clips[0].id);
     }
-  }, [clips, selectedClipId]);
+    if (clips.length > 0 && !isAnalyzing) {
+      setMobileViewTab('preview');
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 350);
+    }
+  }, [clips.length, isAnalyzing]);
 
   // Fetch available royalty-free music tracks from backend on mount
   useEffect(() => {
@@ -1582,9 +1598,21 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
 
         {/* 3. Results Section: Detected Clips & Interactive Preview Player */}
         {job && clips.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 md:gap-6 items-start">
+          <div ref={resultsRef} className="grid grid-cols-1 lg:grid-cols-12 gap-5 md:gap-6 items-start mt-4">
             {/* Mobile View Toggle Tabs (Clips List vs 9:16 Phone Preview) */}
-            <div className="flex lg:hidden items-center p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 w-full col-span-1">
+            <div className="flex lg:hidden items-center p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 w-full col-span-1 shadow-lg">
+              <button
+                type="button"
+                onClick={() => setMobileViewTab('preview')}
+                className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  mobileViewTab === 'preview'
+                    ? 'bg-gradient-to-r from-rose-500 to-red-600 text-white shadow-md'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Smartphone size={13} />
+                <span>9:16 Phone Preview 📱</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setMobileViewTab('clips')}
@@ -1596,22 +1624,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
               >
                 Clips Feed ({clips.length})
               </button>
-              <button
-                type="button"
-                onClick={() => setMobileViewTab('preview')}
-                className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  mobileViewTab === 'preview'
-                    ? 'bg-rose-500 text-white shadow-md'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Smartphone size={13} />
-                <span>9:16 Phone Preview</span>
-              </button>
             </div>
 
-            {/* Left 7 Columns: Video Overview & Detected Clips List */}
-            <div className={`flex-col gap-4 ${mobileViewTab === 'preview' ? 'hidden lg:flex lg:col-span-7' : 'flex lg:col-span-7'}`}>
+            {/* Left Column: Video Overview & Detected Clips List */}
+            <div className={`flex-col gap-4 ${mobileViewTab === 'preview' ? 'hidden lg:flex lg:col-span-5 xl:col-span-4' : 'flex lg:col-span-5 xl:col-span-4'}`}>
               {/* Video Info Header Card */}
               {job.videoInfo && (
                 <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-850 flex items-center gap-3">
@@ -1979,7 +1995,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     {clips.map((c, idx) => (
                       <button
                         key={c.id}
-                        onClick={() => setSelectedClipId(c.id)}
+                        onClick={() => {
+                          setSelectedClipId(c.id);
+                          setMobileViewTab('preview');
+                        }}
                         className={`px-1.5 py-0.5 rounded font-mono font-bold shrink-0 transition-all ${
                           (selectedClipId === c.id || (!selectedClipId && idx === 0))
                             ? 'bg-rose-500 text-white shadow-sm'
@@ -2002,7 +2021,10 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                   return (
                     <div
                       key={clip.id}
-                      onClick={() => setSelectedClipId(clip.id)}
+                      onClick={() => {
+                        setSelectedClipId(clip.id);
+                        setMobileViewTab('preview');
+                      }}
                       className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col gap-2 ${
                         isSelected
                           ? 'bg-zinc-900/90 border-rose-500/60 shadow-lg shadow-rose-500/5 ring-1 ring-rose-500/30'
@@ -2174,23 +2196,36 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
               </div>
             </div>
 
-            {/* Right 5 Columns: Realistic 9:16 Phone Preview & Actions */}
-            <div className={`flex-col gap-4 sticky top-16 lg:top-20 ${mobileViewTab === 'clips' ? 'hidden lg:flex lg:col-span-5' : 'flex lg:col-span-5'}`}>
-              <div className="bg-zinc-950/80 border border-zinc-850 rounded-2xl p-4 sm:p-5 flex flex-col items-center gap-4 sm:gap-5 backdrop-blur-md max-h-none lg:max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar">
-                <div className="w-full flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
+            {/* Right Column: Realistic 9:16 Phone Preview & Studio Editor (Main Big Box) */}
+            <div className={`flex-col gap-4 ${mobileViewTab === 'clips' ? 'hidden lg:flex lg:col-span-7 xl:col-span-8' : 'flex lg:col-span-7 xl:col-span-8'}`}>
+              <div className="w-full bg-zinc-950/90 border border-zinc-800 rounded-3xl p-4 sm:p-6 lg:p-7 flex flex-col gap-5 sm:gap-6 backdrop-blur-md shadow-2xl">
+                {/* Header: Title, Active Clip Badge, Size Switcher, Framing */}
+                <div className="w-full flex items-center justify-between gap-3 flex-wrap pb-3 border-b border-zinc-800/80">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <button
                       type="button"
                       onClick={() => setMobileViewTab('clips')}
-                      className="lg:hidden p-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white shrink-0"
+                      className="lg:hidden p-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white shrink-0"
                       title="Back to Clips List"
                     >
-                      <ArrowLeft size={13} />
+                      <ArrowLeft size={14} />
                     </button>
-                    <Smartphone size={16} className="text-rose-400 shrink-0" />
-                    <span className="text-xs font-bold text-zinc-300 truncate">
-                      {activeClip ? activeClip.title.substring(0, 22) : '9:16 Live Preview'}
-                    </span>
+                    <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                      <Smartphone size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30">
+                          Active Clip #{clips.findIndex((c) => c.id === activeClip?.id) + 1}
+                        </span>
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          {formatTime(currentStart)} - {formatTime(currentEnd)} ({Math.round(clipDuration)}s)
+                        </span>
+                      </div>
+                      <h3 className="text-xs sm:text-sm font-bold text-zinc-100 truncate mt-0.5">
+                        {activeClip?.title || '9:16 Short Preview Studio'}
+                      </h3>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -2204,7 +2239,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                             ? 'bg-zinc-700 text-white'
                             : 'text-zinc-400 hover:text-white'
                         }`}
-                        title="Compact View (260px)"
+                        title="Compact View (240px)"
                       >
                         S
                       </button>
@@ -2216,7 +2251,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                             ? 'bg-zinc-700 text-white'
                             : 'text-zinc-400 hover:text-white'
                         }`}
-                        title="Standard View (310px)"
+                        title="Standard View (280px)"
                       >
                         M
                       </button>
@@ -2228,7 +2263,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                             ? 'bg-rose-600 text-white shadow-sm'
                             : 'text-zinc-400 hover:text-white'
                         }`}
-                        title="Large 9:16 Cinema View (360px)"
+                        title="Large 9:16 Cinema View (335px)"
                       >
                         L (Reel)
                       </button>
@@ -2248,677 +2283,719 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                   </div>
                 </div>
 
-                {/* Simulated Smartphone Shell */}
-                <div
-                  ref={phoneRef}
-                  className={`relative ${
-                    phonePreviewSize === 'compact'
-                      ? 'w-[230px] h-[408px]'
-                      : phonePreviewSize === 'standard'
-                      ? 'w-[270px] h-[480px]'
-                      : 'w-[300px] sm:w-[325px] h-[533px] sm:h-[578px]'
-                  } bg-black rounded-[36px] p-2 sm:p-2.5 shadow-2xl border-4 border-zinc-800 ring-1 ring-zinc-700/50 overflow-hidden flex flex-col items-center justify-center transition-all duration-200 group/phone`}
-                >
-                  {/* Camera notch */}
-                  <div className="absolute top-2 w-16 h-3 bg-zinc-900 rounded-full z-30 pointer-events-none" />
+                {/* Main Content Layout: Side-by-Side on XL, Stacked on LG & Mobile */}
+                <div className="w-full flex flex-col xl:flex-row items-center xl:items-start gap-6">
+                  {/* Left Column in Big Box: Phone Shell + Scrubber + Transport */}
+                  <div className="flex flex-col items-center gap-3.5 w-full xl:w-[350px] shrink-0">
+                    {/* Simulated Smartphone Shell */}
+                    <div
+                      ref={phoneRef}
+                      className={`relative ${
+                        phonePreviewSize === 'compact'
+                          ? 'w-[240px] h-[426px]'
+                          : phonePreviewSize === 'standard'
+                          ? 'w-[280px] h-[498px]'
+                          : 'w-[310px] sm:w-[335px] h-[551px] sm:h-[595px]'
+                      } bg-black rounded-[36px] p-2 sm:p-2.5 shadow-2xl border-4 border-zinc-800 ring-1 ring-zinc-700/50 overflow-hidden flex flex-col items-center justify-center transition-all duration-200 group/phone`}
+                    >
+                      {/* Camera notch */}
+                      <div className="absolute top-2 w-16 h-3 bg-zinc-900 rounded-full z-30 pointer-events-none" />
 
-                  {/* Screen viewport */}
-                  <div className="relative w-full h-full rounded-[26px] overflow-hidden bg-black flex items-center justify-center">
-                    {/* Media Layer */}
-                    {job.videoUrl ? (
-                      <>
-                        {/* Background for 9:16 blurred mode */}
-                        {aspectRatio === '9:16-blur' && (
-                          <video
-                            src={`${API_URL}${job.videoUrl}`}
-                            className="absolute inset-0 w-full h-full object-cover blur-md opacity-60 scale-125 select-none pointer-events-none"
-                            muted
-                            loop
-                            playsInline
+                      {/* Screen viewport */}
+                      <div className="relative w-full h-full rounded-[26px] overflow-hidden bg-black flex items-center justify-center">
+                        {/* Media Layer */}
+                        {job.videoUrl ? (
+                          <>
+                            {/* Background for 9:16 blurred mode */}
+                            {aspectRatio === '9:16-blur' && (
+                              <video
+                                src={`${API_URL}${job.videoUrl}`}
+                                className="absolute inset-0 w-full h-full object-cover blur-md opacity-60 scale-125 select-none pointer-events-none"
+                                muted
+                                loop
+                                playsInline
+                              />
+                            )}
+
+                            {/* Foreground Video */}
+                            <video
+                              ref={videoRef}
+                              src={`${API_URL}${job.videoUrl}`}
+                              poster={resolvedThumbnail}
+                              preload="auto"
+                              onLoadedMetadata={(e) => {
+                                e.currentTarget.currentTime = currentStart;
+                                setCurrentPlayTime(currentStart);
+                              }}
+                              className={`relative z-10 ${
+                                aspectRatio === '9:16-crop'
+                                  ? 'w-full h-full object-cover'
+                                  : aspectRatio === 'original'
+                                  ? 'w-full object-contain'
+                                  : 'w-full object-contain max-h-full'
+                              }`}
+                              playsInline
+                            />
+                          </>
+                        ) : isEmbedPlaying && ytId ? (
+                          <iframe
+                            key={`yt-preview-${activeClip?.id || 'main'}-${Math.floor(currentStart)}`}
+                            src={`https://www.youtube.com/embed/${ytId}?start=${Math.floor(currentStart)}&end=${Math.ceil(currentEnd)}&autoplay=1&controls=1&rel=0&modestbranding=1`}
+                            title={activeClip?.title || 'YouTube Short Preview'}
+                            className="relative z-10 w-full h-full object-cover pointer-events-auto"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
                           />
-                        )}
-
-                        {/* Foreground Video */}
-                        <video
-                          ref={videoRef}
-                          src={`${API_URL}${job.videoUrl}`}
-                          poster={job?.videoInfo?.thumbnail}
-                          preload="auto"
-                          className={`relative z-10 ${
-                            aspectRatio === '9:16-crop'
-                              ? 'w-full h-full object-cover'
-                              : aspectRatio === 'original'
-                              ? 'w-full object-contain'
-                              : 'w-full object-contain max-h-full'
-                          }`}
-                          playsInline
-                        />
-                      </>
-                    ) : isEmbedPlaying && job?.videoInfo?.id && job.videoInfo.id !== 'unknown' ? (
-                      <iframe
-                        key={`yt-preview-${activeClip?.id || 'main'}-${Math.floor(currentStart)}`}
-                        src={`https://www.youtube.com/embed/${job.videoInfo.id}?start=${Math.floor(currentStart)}&end=${Math.ceil(currentEnd)}&autoplay=1&controls=1&rel=0&modestbranding=1`}
-                        title={activeClip?.title || 'YouTube Short Preview'}
-                        className="relative z-10 w-full h-full object-cover pointer-events-auto"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                      />
-                    ) : job?.videoInfo?.id && job.videoInfo.id !== 'unknown' ? (
-                      <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden select-none">
-                        {/* Ambient blurred backdrop */}
-                        <img
-                          src={job?.videoInfo?.thumbnail || `https://i.ytimg.com/vi/${job?.videoInfo?.id}/hqdefault.jpg`}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover blur-xl opacity-60 scale-125 select-none pointer-events-none"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
-                        {/* Crisp foreground poster */}
-                        <img
-                          src={job?.videoInfo?.thumbnail || `https://i.ytimg.com/vi/${job?.videoInfo?.id}/hqdefault.jpg`}
-                          alt={activeClip?.title || 'Preview thumbnail'}
-                          className={`relative z-10 ${
-                            aspectRatio === '9:16-crop'
-                              ? 'w-full h-full object-cover'
-                              : 'w-full object-contain max-h-full'
-                          }`}
-                        />
-                      </div>
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-zinc-950 text-center gap-2.5">
-                        <RefreshCw size={24} className="animate-spin text-rose-400" />
-                        <span className="text-xs font-bold text-zinc-100">
-                          {job?.stage || 'Connecting video stream...'}
-                        </span>
-                        <span className="text-[10px] text-zinc-400">
-                          {Math.round(displayProgress)}%
-                          {job?.downloadProgress?.speed ? ` • ${job.downloadProgress.speed}` : ''}
-                        </span>
-                        <div className="w-36 h-1.5 rounded-full bg-zinc-800 overflow-hidden mt-1">
-                          <div
-                            className="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 transition-all duration-200 ease-out rounded-full"
-                            style={{ width: `${Math.min(100, Math.max(1, displayProgress))}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Stream sync overlay badge at top right when buffering local MP4 */}
-                    {!job.videoUrl && job?.videoInfo?.id && (
-                      <div className="absolute top-2.5 right-2.5 z-25 pointer-events-none bg-black/75 backdrop-blur-md rounded-full px-2.5 py-1 border border-zinc-700/60 flex items-center gap-1.5 text-[9px] shadow-lg">
-                        <RefreshCw size={10} className="animate-spin text-rose-400" />
-                        <span className="text-zinc-200 font-mono font-medium">
-                          {job?.downloadProgress?.percent ? `Buffering HD ${Math.round(job.downloadProgress.percent)}%` : 'Stream ready'}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Simulated Top Headline Banner */}
-                    {currentHeadline && (
-                      <div className="absolute top-8 left-3 right-3 z-20 pointer-events-none">
-                        <div className="bg-black/75 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-1.5 text-center shadow-lg">
-                          <span className="text-[10px] font-black tracking-wide text-white uppercase drop-shadow">
-                            {currentHeadline}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Real-Time Kinetic Motion Graphics Lyric/Dialogue Subtitle Overlay */}
-                    {captionStyle !== 'none' && (() => {
-                      const currentSegs = activeClip?.transcriptSegments || job?.transcript || [];
-                      const activeSeg = currentSegs.find(
-                        (s) => currentPlayTime >= s.start - 0.05 && currentPlayTime <= s.end + 0.35
-                      );
-                      if (!activeSeg) return null;
-
-                      const words =
-                        activeSeg.words && activeSeg.words.length > 0
-                          ? activeSeg.words
-                          : activeSeg.text.split(/\s+/).map((w, idx, arr) => ({
-                              word: w,
-                              start: activeSeg.start + (idx * (activeSeg.end - activeSeg.start)) / arr.length,
-                              end: activeSeg.start + ((idx + 1) * (activeSeg.end - activeSeg.start)) / arr.length,
-                            }));
-
-                      const activeWordIdx = words.findIndex(
-                        (w) => currentPlayTime >= w.start && currentPlayTime <= w.end
-                      );
-
-                      return (
-                        <div className="absolute bottom-16 left-3 right-3 z-20 pointer-events-none flex justify-center text-center">
-                          <div
-                            className={`px-2.5 py-1.5 rounded-xl max-w-[95%] transition-all ${
-                              captionStyle === 'minimal'
-                                ? 'bg-black/60 backdrop-blur-sm border border-white/10'
-                                : 'drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]'
-                            }`}
-                          >
-                            <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-black uppercase tracking-wide">
-                              {words.map((w, wIdx) => {
-                                const isWordActive =
-                                  wIdx === activeWordIdx || (activeWordIdx === -1 && wIdx === 0);
-                                return (
-                                  <span
-                                    key={wIdx}
-                                    className={`transition-all duration-100 inline-block ${
-                                      isWordActive
-                                        ? captionStyle === 'neon'
-                                          ? 'text-[#00F5FF] scale-125 font-black drop-shadow-[0_0_12px_#00F5FF]'
-                                          : captionStyle === 'mrbeast'
-                                          ? 'text-[#39FF14] scale-125 font-black drop-shadow-[0_0_10px_#39FF14]'
-                                          : captionStyle === 'karaoke'
-                                          ? 'text-[#FFE81F] scale-115 font-black'
-                                          : captionStyle === 'minimal'
-                                          ? 'text-white scale-105 font-bold'
-                                          : 'text-[#FFE81F] scale-125 font-black drop-shadow-[0_0_10px_#FFE81F]'
-                                        : 'text-white/80 text-[10.5px] sm:text-xs'
-                                    } ${isWordActive ? 'text-xs sm:text-sm' : ''}`}
-                                    style={{
-                                      textShadow: isWordActive
-                                        ? '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000'
-                                        : '1px 1px 0 #000, -1px -1px 0 #000',
-                                    }}
-                                  >
-                                    {w.word}
-                                  </span>
-                                );
-                              })}
+                        ) : resolvedThumbnail ? (
+                          <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden select-none">
+                            {/* Ambient blurred backdrop */}
+                            <img
+                              src={resolvedThumbnail}
+                              alt=""
+                              className="absolute inset-0 w-full h-full object-cover blur-xl opacity-60 scale-125 select-none pointer-events-none"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                            {/* Crisp foreground poster */}
+                            <img
+                              src={resolvedThumbnail}
+                              alt={activeClip?.title || 'Preview thumbnail'}
+                              className={`relative z-10 ${
+                                aspectRatio === '9:16-crop'
+                                  ? 'w-full h-full object-cover'
+                                  : 'w-full object-contain max-h-full'
+                              }`}
+                            />
+                          </div>
+                        ) : (
+                          /* Animated Short Preview Canvas - Guaranteed Visibility */
+                          <div className="relative z-10 w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-rose-950/40 p-5 text-center select-none">
+                            <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-3 shadow-lg shadow-rose-500/10">
+                              <Smartphone size={26} />
+                            </div>
+                            <span className="text-[10px] uppercase tracking-wider text-rose-400 font-bold px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 mb-2">
+                              Short Preview #{clips.findIndex((c) => c.id === activeClip?.id) + 1}
+                            </span>
+                            <h3 className="text-xs font-black text-white line-clamp-2 px-2 drop-shadow">
+                              {activeClip?.title || 'Viral Short Moment'}
+                            </h3>
+                            {activeClip?.hook && (
+                              <p className="text-[10px] text-zinc-400 italic mt-1 line-clamp-2 px-3">
+                                "{activeClip.hook}"
+                              </p>
+                            )}
+                            <div className="mt-3 flex items-center gap-1.5 text-[9px] font-mono text-zinc-400 bg-black/60 px-2.5 py-1 rounded-full border border-white/10">
+                              <span>Timeline: {formatTime(currentStart)} - {formatTime(currentEnd)}</span>
+                              <span>•</span>
+                              <span className="text-amber-300 font-bold">{Math.round(clipDuration)}s</span>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })()}
+                        )}
 
-                    {/* Floating Central Play / Pause Button - Prominently visible when paused */}
-                    {!isPlaying && !isEmbedPlaying ? (
-                      <button
-                        type="button"
-                        onClick={togglePlay}
-                        className="absolute inset-0 z-25 flex items-center justify-center bg-black/25 hover:bg-black/40 transition-all cursor-pointer group/centerplay"
-                        title="Click to Play Short"
-                      >
-                        <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-rose-600 via-rose-500 to-red-500 text-white flex items-center justify-center shadow-2xl shadow-rose-600/50 ring-4 ring-white/30 group-hover/centerplay:scale-110 active:scale-95 transition-transform duration-200">
-                          <Play size={28} className="ml-1 fill-white text-white" />
-                        </div>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={togglePlay}
-                        className="absolute inset-0 z-25 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity cursor-pointer group/centerpause"
-                        title="Click to Pause Short"
-                      >
-                        <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center shadow-xl ring-2 ring-white/20 hover:scale-105 active:scale-95 transition-transform">
-                          <Pause size={24} className="fill-white text-white" />
-                        </div>
-                      </button>
-                    )}
+                        {/* Stream sync overlay badge at top right when buffering local MP4 */}
+                        {!job.videoUrl && job?.videoInfo?.id && (
+                          <div className="absolute top-2.5 right-2.5 z-25 pointer-events-none bg-black/75 backdrop-blur-md rounded-full px-2.5 py-1 border border-zinc-700/60 flex items-center gap-1.5 text-[9px] shadow-lg">
+                            <RefreshCw size={10} className="animate-spin text-rose-400" />
+                            <span className="text-zinc-200 font-mono font-medium">
+                              {job?.downloadProgress?.percent ? `Buffering HD ${Math.round(job.downloadProgress.percent)}%` : 'Stream ready'}
+                            </span>
+                          </div>
+                        )}
 
-                    {/* In-Phone Floating Mini Player HUD - ALWAYS visible inside phone viewport */}
-                    <div className="absolute bottom-2.5 left-2.5 right-2.5 z-30 bg-black/75 backdrop-blur-md rounded-xl p-2 flex items-center justify-between border border-white/10 text-white shadow-xl">
-                      <button
-                        type="button"
-                        onClick={togglePlay}
-                        className="w-7 h-7 rounded-lg bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-400 hover:to-red-400 text-white flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-md active:scale-95"
-                        title={isPlaying || isEmbedPlaying ? 'Pause' : 'Play'}
-                      >
-                        {isPlaying || isEmbedPlaying ? <Pause size={12} className="fill-white" /> : <Play size={12} className="ml-0.5 fill-white" />}
-                      </button>
+                        {/* Simulated Top Headline Banner */}
+                        {currentHeadline && (
+                          <div className="absolute top-8 left-3 right-3 z-20 pointer-events-none">
+                            <div className="bg-black/75 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-1.5 text-center shadow-lg">
+                              <span className="text-[10px] font-black tracking-wide text-white uppercase drop-shadow">
+                                {currentHeadline}
+                              </span>
+                            </div>
+                          </div>
+                        )}
 
-                      <div className="flex-1 mx-2">
-                        <div className="flex justify-between text-[9px] font-mono text-zinc-300">
-                          <span>{formatTime(currentProgressSec)}</span>
-                          <span>{formatTime(clipDuration)}</span>
-                        </div>
-                        <div
-                          onClick={(e) => {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const pct = (e.clientX - rect.left) / rect.width;
-                            handleSeek(pct * clipDuration);
-                          }}
-                          className="w-full bg-zinc-800 h-1.5 rounded-full cursor-pointer relative overflow-hidden mt-0.5"
-                        >
-                          <div
-                            className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full"
-                            style={{ width: `${Math.min(100, Math.max(0, (currentProgressSec / clipDuration) * 100))}%` }}
-                          />
+                        {/* Real-Time Kinetic Motion Graphics Lyric/Dialogue Subtitle Overlay */}
+                        {captionStyle !== 'none' && (() => {
+                          const currentSegs = activeClip?.transcriptSegments || job?.transcript || [];
+                          const activeSeg = currentSegs.find(
+                            (s) => currentPlayTime >= s.start - 0.05 && currentPlayTime <= s.end + 0.35
+                          );
+                          if (!activeSeg) return null;
+
+                          const words =
+                            activeSeg.words && activeSeg.words.length > 0
+                              ? activeSeg.words
+                              : activeSeg.text.split(/\s+/).map((w, idx, arr) => ({
+                                  word: w,
+                                  start: activeSeg.start + (idx * (activeSeg.end - activeSeg.start)) / arr.length,
+                                  end: activeSeg.start + ((idx + 1) * (activeSeg.end - activeSeg.start)) / arr.length,
+                                }));
+
+                          const activeWordIdx = words.findIndex(
+                            (w) => currentPlayTime >= w.start && currentPlayTime <= w.end
+                          );
+
+                          return (
+                            <div className="absolute bottom-16 left-3 right-3 z-20 pointer-events-none flex justify-center text-center">
+                              <div
+                                className={`px-2.5 py-1.5 rounded-xl max-w-[95%] transition-all ${
+                                  captionStyle === 'minimal'
+                                    ? 'bg-black/60 backdrop-blur-sm border border-white/10'
+                                    : 'drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]'
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-black uppercase tracking-wide">
+                                  {words.map((w, wIdx) => {
+                                    const isWordActive =
+                                      wIdx === activeWordIdx || (activeWordIdx === -1 && wIdx === 0);
+                                    return (
+                                      <span
+                                        key={wIdx}
+                                        className={`transition-all duration-100 inline-block ${
+                                          isWordActive
+                                            ? captionStyle === 'neon'
+                                              ? 'text-[#00F5FF] scale-125 font-black drop-shadow-[0_0_12px_#00F5FF]'
+                                              : captionStyle === 'mrbeast'
+                                              ? 'text-[#39FF14] scale-125 font-black drop-shadow-[0_0_10px_#39FF14]'
+                                              : captionStyle === 'karaoke'
+                                              ? 'text-[#FFE81F] scale-115 font-black'
+                                              : captionStyle === 'minimal'
+                                              ? 'text-white scale-105 font-bold'
+                                              : 'text-[#FFE81F] scale-125 font-black drop-shadow-[0_0_10px_#FFE81F]'
+                                            : 'text-white/80 text-[10.5px] sm:text-xs'
+                                        } ${isWordActive ? 'text-xs sm:text-sm' : ''}`}
+                                        style={{
+                                          textShadow: isWordActive
+                                            ? '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000'
+                                            : '1px 1px 0 #000, -1px -1px 0 #000',
+                                        }}
+                                      >
+                                        {w.word}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Floating Central Play / Pause Button - Prominently visible when paused */}
+                        {!isPlaying && !isEmbedPlaying ? (
+                          <button
+                            type="button"
+                            onClick={togglePlay}
+                            className="absolute inset-0 z-25 flex items-center justify-center bg-black/25 hover:bg-black/40 transition-all cursor-pointer group/centerplay"
+                            title="Click to Play Short"
+                          >
+                            <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-rose-600 via-rose-500 to-red-500 text-white flex items-center justify-center shadow-2xl shadow-rose-600/50 ring-4 ring-white/30 group-hover/centerplay:scale-110 active:scale-95 transition-transform duration-200">
+                              <Play size={28} className="ml-1 fill-white text-white" />
+                            </div>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={togglePlay}
+                            className="absolute inset-0 z-25 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity cursor-pointer group/centerpause"
+                            title="Click to Pause Short"
+                          >
+                            <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-md text-white flex items-center justify-center shadow-xl ring-2 ring-white/20 hover:scale-105 active:scale-95 transition-transform">
+                              <Pause size={24} className="fill-white text-white" />
+                            </div>
+                          </button>
+                        )}
+
+                        {/* In-Phone Floating Mini Player HUD - ALWAYS visible inside phone viewport */}
+                        <div className="absolute bottom-2.5 left-2.5 right-2.5 z-30 bg-black/75 backdrop-blur-md rounded-xl p-2 flex items-center justify-between border border-white/10 text-white shadow-xl">
+                          <button
+                            type="button"
+                            onClick={togglePlay}
+                            className="w-7 h-7 rounded-lg bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-400 hover:to-red-400 text-white flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-md active:scale-95"
+                            title={isPlaying || isEmbedPlaying ? 'Pause' : 'Play'}
+                          >
+                            {isPlaying || isEmbedPlaying ? <Pause size={12} className="fill-white" /> : <Play size={12} className="ml-0.5 fill-white" />}
+                          </button>
+
+                          <div className="flex-1 mx-2">
+                            <div className="flex justify-between text-[9px] font-mono text-zinc-300">
+                              <span>{formatTime(currentProgressSec)}</span>
+                              <span>{formatTime(clipDuration)}</span>
+                            </div>
+                            <div
+                              onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const pct = (e.clientX - rect.left) / rect.width;
+                                handleSeek(pct * clipDuration);
+                              }}
+                              className="w-full bg-zinc-800 h-1.5 rounded-full cursor-pointer relative overflow-hidden mt-0.5"
+                            >
+                              <div
+                                className="h-full bg-gradient-to-r from-rose-500 to-amber-500 rounded-full"
+                                style={{ width: `${Math.min(100, Math.max(0, (currentProgressSec / clipDuration) * 100))}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={handleToggleMute}
+                              className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                              title={isMuted ? 'Unmute' : 'Mute'}
+                            >
+                              {isMuted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleFullscreen}
+                              className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                              title="Fullscreen"
+                            >
+                              <Maximize2 size={13} />
+                            </button>
+                          </div>
                         </div>
                       </div>
+                    </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                    {/* Enhanced Interactive Scrubber Bar */}
+                    <div className="w-full flex flex-col gap-1 px-1">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
+                        <span className="text-rose-400 font-bold">{formatTime(currentProgressSec)}</span>
+                        <span className="text-zinc-500 text-[10px]">Timeline: {formatTime(currentStart)} - {formatTime(currentEnd)}</span>
+                        <span className="text-zinc-300 font-bold">{formatTime(clipDuration)}</span>
+                      </div>
+
+                      <div className="relative flex items-center group">
+                        <input
+                          type="range"
+                          min="0"
+                          max={clipDuration}
+                          step="0.1"
+                          value={currentProgressSec}
+                          onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                          className="w-full h-2 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Comprehensive Video Transport Controls Dock */}
+                    <div className="w-full p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 flex items-center justify-between gap-2 shadow-inner">
+                      {/* Left: Rewind, Play/Pause, Fast-forward */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleSkip(-5)}
+                          className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white transition-all text-xs cursor-pointer active:scale-95"
+                          title="Rewind 5s"
+                        >
+                          <Rewind size={14} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={togglePlay}
+                          className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 active:scale-95 transition-all cursor-pointer"
+                        >
+                          {isPlaying || isEmbedPlaying ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
+                          <span>{isPlaying || isEmbedPlaying ? 'Pause' : 'Play'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSkip(5)}
+                          className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white transition-all text-xs cursor-pointer active:scale-95"
+                          title="Fast forward 5s"
+                        >
+                          <FastForward size={14} />
+                        </button>
+                      </div>
+
+                      {/* Center: Playback Speed & Loop Toggle */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={handleToggleSpeed}
+                          className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[10px] font-mono font-bold transition-all cursor-pointer"
+                          title="Playback Speed"
+                        >
+                          {playbackSpeed}x
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setIsLooping(!isLooping)}
+                          className={`p-1.5 rounded-md border transition-all cursor-pointer ${
+                            isLooping
+                              ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
+                              : 'bg-zinc-800 border-zinc-750 text-zinc-500'
+                          }`}
+                          title={isLooping ? 'Auto-looping ON' : 'Auto-looping OFF'}
+                        >
+                          <Repeat size={13} />
+                        </button>
+                      </div>
+
+                      {/* Right: Volume slider */}
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={handleToggleMute}
-                          className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                          className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
                           title={isMuted ? 'Unmute' : 'Mute'}
                         >
-                          {isMuted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                          {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
                         </button>
-                        <button
-                          type="button"
-                          onClick={handleFullscreen}
-                          className="p-1 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-                          title="Fullscreen"
-                        >
-                          <Maximize2 size={13} />
-                        </button>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={isMuted ? 0 : volume}
+                          onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                          className="w-14 h-1.5 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer"
+                          title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                        />
                       </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Enhanced Interactive Scrubber Bar */}
-                <div className="w-full flex flex-col gap-1 px-1">
-                  <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
-                    <span className="text-rose-400 font-bold">{formatTime(currentProgressSec)}</span>
-                    <span className="text-zinc-500 text-[10px]">Timeline: {formatTime(currentStart)} - {formatTime(currentEnd)}</span>
-                    <span className="text-zinc-300 font-bold">{formatTime(clipDuration)}</span>
-                  </div>
-
-                  <div className="relative flex items-center group">
-                    <input
-                      type="range"
-                      min="0"
-                      max={clipDuration}
-                      step="0.1"
-                      value={currentProgressSec}
-                      onChange={(e) => handleSeek(parseFloat(e.target.value))}
-                      className="w-full h-2 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Comprehensive Video Transport Controls Dock */}
-                <div className="w-full p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 flex items-center justify-between gap-2 shadow-inner">
-                  {/* Left: Rewind, Play/Pause, Fast-forward */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleSkip(-5)}
-                      className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white transition-all text-xs cursor-pointer active:scale-95"
-                      title="Rewind 5s"
-                    >
-                      <Rewind size={14} />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={togglePlay}
-                      className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 active:scale-95 transition-all cursor-pointer"
-                    >
-                      {isPlaying || isEmbedPlaying ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
-                      <span>{isPlaying || isEmbedPlaying ? 'Pause' : 'Play'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSkip(5)}
-                      className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white transition-all text-xs cursor-pointer active:scale-95"
-                      title="Fast forward 5s"
-                    >
-                      <FastForward size={14} />
-                    </button>
-                  </div>
-
-                  {/* Center: Playback Speed & Loop Toggle */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={handleToggleSpeed}
-                      className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[10px] font-mono font-bold transition-all cursor-pointer"
-                      title="Playback Speed"
-                    >
-                      {playbackSpeed}x
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsLooping(!isLooping)}
-                      className={`p-1.5 rounded-md border transition-all cursor-pointer ${
-                        isLooping
-                          ? 'bg-rose-500/20 border-rose-500/50 text-rose-400'
-                          : 'bg-zinc-800 border-zinc-750 text-zinc-500'
-                      }`}
-                      title={isLooping ? 'Auto-looping ON' : 'Auto-looping OFF'}
-                    >
-                      <Repeat size={13} />
-                    </button>
-                  </div>
-
-                  {/* Right: Volume slider */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={handleToggleMute}
-                      className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
-                      title={isMuted ? 'Unmute' : 'Mute'}
-                    >
-                      {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                    </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={isMuted ? 0 : volume}
-                      onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                      className="w-14 h-1.5 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer"
-                      title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-                    />
-                  </div>
-                </div>
-
-                {/* Motion Graphical Texts / Kinetic Lyric Captions Style Selector */}
-                <div className="w-full p-3 rounded-xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2 shadow-inner">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Sparkles size={13} className="text-amber-400" />
-                      <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
-                        Kinetic Motion Graphics Lyrics & Captions
-                      </span>
+                  {/* Right Column in Big Box: Studio Controls & Actions */}
+                  <div className="flex-1 w-full flex flex-col gap-4 min-w-0">
+                    {/* Active Clip Quick Headline Customizer */}
+                    <div className="w-full p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
+                          Top Headline Text
+                        </span>
+                        <span className="text-[9.5px] text-zinc-500">Overlaid at top of short</span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g. WAIT FOR THIS 🔥"
+                        value={currentHeadline}
+                        onChange={(e) =>
+                          activeClip &&
+                          setCustomHeadlines({
+                            ...customHeadlines,
+                            [activeClip.id]: e.target.value,
+                          })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500 font-bold"
+                      />
                     </div>
-                    <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
-                      Word-by-Word
-                    </span>
-                  </div>
 
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 text-[10px]">
-                    {[
-                      { id: 'hormozi', label: 'Hormozi', desc: 'Yellow Pop', color: 'from-amber-500/20 to-yellow-500/10 border-amber-500/50 text-amber-300' },
-                      { id: 'neon', label: 'Neon Cyber', desc: 'Cyan Glow', color: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/50 text-cyan-300' },
-                      { id: 'mrbeast', label: 'MrBeast', desc: 'Lime Burst', color: 'from-lime-500/20 to-emerald-500/10 border-lime-500/50 text-lime-300' },
-                      { id: 'karaoke', label: 'Karaoke', desc: 'Fill Flow', color: 'from-purple-500/20 to-pink-500/10 border-purple-500/50 text-purple-300' },
-                      { id: 'minimal', label: 'Minimal', desc: 'Clean White', color: 'from-zinc-800 to-zinc-900 border-zinc-700 text-zinc-200' },
-                      { id: 'none', label: 'Off', desc: 'No Captions', color: 'from-zinc-900 to-zinc-950 border-zinc-800 text-zinc-500' },
-                    ].map((style) => (
-                      <button
-                        key={style.id}
-                        type="button"
-                        onClick={() => setCaptionStyle(style.id as CaptionStyle)}
-                        className={`p-1.5 rounded-lg border flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
-                          captionStyle === style.id
-                            ? `bg-gradient-to-b ${style.color} shadow-sm font-black ring-1 ring-white/20`
-                            : 'bg-zinc-950/80 border-zinc-850 hover:bg-zinc-900 text-zinc-400 font-semibold'
-                        }`}
-                      >
-                        <span className="truncate w-full font-bold">{style.label}</span>
-                        <span className="text-[8.5px] opacity-75">{style.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                    {/* Motion Graphical Texts / Kinetic Lyric Captions Style Selector */}
+                    <div className="w-full p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2.5 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles size={13} className="text-amber-400" />
+                          <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
+                            Kinetic Motion Graphics Lyrics & Captions
+                          </span>
+                        </div>
+                        <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                          Word-by-Word
+                        </span>
+                      </div>
 
-                {/* Copyright-Free Background Music Selector with Auto-Ducking */}
-                <div className="w-full p-3 rounded-xl bg-gradient-to-r from-zinc-900 via-zinc-950 to-zinc-900 border border-zinc-800 flex flex-col gap-2.5 shadow-inner">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Music size={13} className="text-rose-400" />
-                      <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
-                        Copyright-Free Background Music
-                      </span>
-                    </div>
-                    <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30">
-                      Royalty Free
-                    </span>
-                  </div>
-
-                  {/* Track Selection & Play Preview */}
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <select
-                        value={bgMusicTrack}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setBgMusicTrack(val);
-                          if (isMusicPreviewPlaying && musicAudioRef.current) {
-                            const track = musicTracks.find((t) => t.id === val);
-                            if (track?.url) {
-                              musicAudioRef.current.src = track.url.startsWith('http') ? track.url : `${API_URL}${track.url}`;
-                              musicAudioRef.current.play().catch(() => {});
-                            } else {
-                              musicAudioRef.current.pause();
-                              setIsMusicPreviewPlaying(false);
-                            }
-                          }
-                        }}
-                        className="w-full bg-zinc-950 border border-zinc-750 hover:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-rose-500 cursor-pointer"
-                      >
-                        {musicTracks.map((track) => (
-                          <option key={track.id} value={track.id}>
-                            {track.name} ({track.genre})
-                          </option>
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 text-[10px]">
+                        {[
+                          { id: 'hormozi', label: 'Hormozi', desc: 'Yellow Pop', color: 'from-amber-500/20 to-yellow-500/10 border-amber-500/50 text-amber-300' },
+                          { id: 'neon', label: 'Neon Cyber', desc: 'Cyan Glow', color: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/50 text-cyan-300' },
+                          { id: 'mrbeast', label: 'MrBeast', desc: 'Lime Burst', color: 'from-lime-500/20 to-emerald-500/10 border-lime-500/50 text-lime-300' },
+                          { id: 'karaoke', label: 'Karaoke', desc: 'Fill Flow', color: 'from-purple-500/20 to-pink-500/10 border-purple-500/50 text-purple-300' },
+                          { id: 'minimal', label: 'Minimal', desc: 'Clean White', color: 'from-zinc-800 to-zinc-900 border-zinc-700 text-zinc-200' },
+                          { id: 'none', label: 'Off', desc: 'No Captions', color: 'from-zinc-900 to-zinc-950 border-zinc-800 text-zinc-500' },
+                        ].map((style) => (
+                          <button
+                            key={style.id}
+                            type="button"
+                            onClick={() => setCaptionStyle(style.id as CaptionStyle)}
+                            className={`p-2 rounded-xl border flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
+                              captionStyle === style.id
+                                ? `bg-gradient-to-b ${style.color} shadow-sm font-black ring-1 ring-white/20`
+                                : 'bg-zinc-950/80 border-zinc-850 hover:bg-zinc-900 text-zinc-400 font-semibold'
+                            }`}
+                          >
+                            <span className="truncate w-full font-bold">{style.label}</span>
+                            <span className="text-[8.5px] opacity-75">{style.desc}</span>
+                          </button>
                         ))}
-                      </select>
+                      </div>
                     </div>
 
-                    {/* Preview Play/Stop Button */}
-                    {bgMusicTrack !== 'none' && (
+                    {/* Copyright-Free Background Music Selector with Auto-Ducking */}
+                    <div className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-950 to-zinc-900 border border-zinc-800 flex flex-col gap-2.5 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Music size={13} className="text-rose-400" />
+                          <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
+                            Copyright-Free Background Music
+                          </span>
+                        </div>
+                        <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30">
+                          Royalty Free
+                        </span>
+                      </div>
+
+                      {/* Track Selection & Play Preview */}
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <select
+                            value={bgMusicTrack}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setBgMusicTrack(val);
+                              if (isMusicPreviewPlaying && musicAudioRef.current) {
+                                const track = musicTracks.find((t) => t.id === val);
+                                if (track?.url) {
+                                  musicAudioRef.current.src = track.url.startsWith('http') ? track.url : `${API_URL}${track.url}`;
+                                  musicAudioRef.current.play().catch(() => {});
+                                } else {
+                                  musicAudioRef.current.pause();
+                                  setIsMusicPreviewPlaying(false);
+                                }
+                              }
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-750 hover:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-rose-500 cursor-pointer"
+                          >
+                            {musicTracks.map((track) => (
+                              <option key={track.id} value={track.id}>
+                                {track.name} ({track.genre})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Preview Play/Stop Button */}
+                        {bgMusicTrack !== 'none' && (
+                          <button
+                            type="button"
+                            onClick={() => toggleMusicPreview(bgMusicTrack)}
+                            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                              isMusicPreviewPlaying
+                                ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30 animate-pulse'
+                                : 'bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white border border-zinc-700'
+                            }`}
+                            title="Listen to music preview"
+                          >
+                            {isMusicPreviewPlaying ? (
+                              <>
+                                <Pause size={12} />
+                                <span>Stop</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play size={12} />
+                                <span>Preview</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Volume Slider and Auto-Ducking Switch */}
+                      {bgMusicTrack !== 'none' && (
+                        <div className="flex items-center justify-between gap-3 pt-1 border-t border-zinc-850/80 text-[10.5px]">
+                          {/* Music Volume Slider */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-zinc-400 font-semibold">Volume:</span>
+                            <input
+                              type="range"
+                              min="0.05"
+                              max="0.8"
+                              step="0.05"
+                              value={bgMusicVolume}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setBgMusicVolume(val);
+                                if (musicAudioRef.current) {
+                                  musicAudioRef.current.volume = val;
+                                }
+                              }}
+                              className="w-16 h-1.5 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer"
+                              title={`Music Volume: ${Math.round(bgMusicVolume * 100)}%`}
+                            />
+                            <span className="font-mono text-zinc-300 font-bold w-7 text-right">
+                              {Math.round(bgMusicVolume * 100)}%
+                            </span>
+                          </div>
+
+                          {/* Auto-Ducking Speech Priority Toggle */}
+                          <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 select-none">
+                            <input
+                              type="checkbox"
+                              checked={autoDucking}
+                              onChange={(e) => setAutoDucking(e.target.checked)}
+                              className="w-3.5 h-3.5 rounded bg-zinc-900 border-zinc-700 accent-rose-500 cursor-pointer"
+                            />
+                            <span className="font-bold text-zinc-300 hover:text-white transition-colors" title="Automatically lowers background music during voice speech so speech remains 100% crisp and clear">
+                              Auto-Duck Dialogue 🎙️
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Primary Action Buttons */}
+                    <div className="w-full flex flex-col gap-2.5">
+                      {/* Option 1: Direct Folder Save (No ZIP) */}
                       <button
                         type="button"
-                        onClick={() => toggleMusicPreview(bgMusicTrack)}
-                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                          isMusicPreviewPlaying
-                            ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30 animate-pulse'
-                            : 'bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white border border-zinc-700'
-                        }`}
-                        title="Listen to music preview"
+                        onClick={handleSaveDirectlyToFolder}
+                        disabled={isFolderExporting}
+                        className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
                       >
-                        {isMusicPreviewPlaying ? (
+                        {isFolderExporting ? (
                           <>
-                            <Pause size={12} />
-                            <span>Stop</span>
+                            <RefreshCw size={14} className="animate-spin text-white" />
+                            <span>{folderProgressMsg || 'Saving directly into folder...'}</span>
                           </>
                         ) : (
                           <>
-                            <Play size={12} />
-                            <span>Preview</span>
+                            <FolderDown size={15} />
+                            <span>📁 Save All ({clips.length}) Directly to Folder (No ZIP)</span>
                           </>
                         )}
                       </button>
+
+                      {/* Single Short Fast Render & Download */}
+                      <button
+                        type="button"
+                        onClick={handleRenderShort}
+                        disabled={isRendering}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-rose-500/25 active:scale-95 transition-all cursor-pointer"
+                      >
+                        {isRendering ? (
+                          <>
+                            <RefreshCw size={14} className="animate-spin" />
+                            <span>{renderProgressMsg || 'Rendering 9:16 Short...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={15} />
+                            <span>⚡ Fast Download This Short (MP4)</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Single Render Smooth Progress Track */}
+                      {isRendering && (
+                        <div className="w-full p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/30 flex flex-col gap-1.5 animate-in fade-in">
+                          <div className="flex items-center justify-between text-[11px] font-bold">
+                            <span className="text-rose-300 flex items-center gap-1.5">
+                              <RefreshCw size={12} className="animate-spin text-rose-400" />
+                              <span>{renderProgressMsg || 'Rendering short...'}</span>
+                            </span>
+                            <span className="font-mono text-rose-400 font-black">{Math.round(renderDisplayPercent)}%</span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-rose-500 to-amber-400 transition-all duration-150 ease-out rounded-full"
+                              style={{ width: `${Math.min(100, Math.max(2, renderDisplayPercent))}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 1-Click Download ALL Clips in a ZIP bundle */}
+                      <button
+                        type="button"
+                        onClick={handleDownloadAllZip}
+                        disabled={isBatchRendering}
+                        className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 disabled:opacity-50 text-zinc-300 hover:text-white text-xs font-bold tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                      >
+                        {isBatchRendering ? (
+                          <>
+                            <RefreshCw size={14} className="animate-spin text-emerald-400" />
+                            <span>{batchProgressMsg || 'Packaging all clips into ZIP...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Archive size={14} className="text-emerald-400" />
+                            <span>Download as ZIP Archive</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Batch ZIP Smooth Progress Track */}
+                      {isBatchRendering && (
+                        <div className="w-full p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 flex flex-col gap-1.5 animate-in fade-in">
+                          <div className="flex items-center justify-between text-[11px] font-bold">
+                            <span className="text-emerald-300 flex items-center gap-1.5">
+                              <RefreshCw size={12} className="animate-spin text-emerald-400" />
+                              <span>{batchProgressMsg || 'Packaging ZIP...'}</span>
+                            </span>
+                            <span className="font-mono text-emerald-400 font-black">{Math.round(batchDisplayPercent)}%</span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-150 ease-out rounded-full"
+                              style={{ width: `${Math.min(100, Math.max(2, batchDisplayPercent))}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {exportedFolderPath && (
+                        <button
+                          type="button"
+                          onClick={handleOpenServerFolder}
+                          className="w-full py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                        >
+                          <FolderOpen size={14} />
+                          <span>Open Folder in File Explorer 📂</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleSendToTimeline}
+                        className="w-full py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                      >
+                        <Sliders size={13} />
+                        <span>Open in Timeline Editor</span>
+                      </button>
+                    </div>
+
+                    {/* Batch ZIP Ready Alert */}
+                    {batchDownloadUrl && (
+                      <div className="w-full p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                        <div className="flex items-center gap-2 text-emerald-400 font-bold truncate">
+                          <Archive size={16} />
+                          <span className="truncate">All Shorts ZIP Ready!</span>
+                        </div>
+                        <a
+                          href={batchDownloadUrl}
+                          download={`${(job?.videoInfo?.title || 'cinemiq').replace(/[\\/:*?"<>|#]/g, ' ').trim()}-shorts.zip`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
+                        >
+                          Save ZIP
+                        </a>
+                      </div>
+                    )}
+
+                    {/* Single Render Success / Download Link */}
+                    {renderedDownloadUrl && (
+                      <div className="w-full p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                        <div className="flex items-center gap-2 text-rose-300 font-bold truncate">
+                          <CheckCircle2 size={16} className="text-emerald-400" />
+                          <span className="truncate">Short MP4 Ready!</span>
+                        </div>
+                        <a
+                          href={renderedDownloadUrl}
+                          download={getFullShortFilename(job?.videoInfo?.title, activeClip?.title)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
+                        >
+                          Save MP4
+                        </a>
+                      </div>
                     )}
                   </div>
-
-                  {/* Volume Slider and Auto-Ducking Switch */}
-                  {bgMusicTrack !== 'none' && (
-                    <div className="flex items-center justify-between gap-3 pt-1 border-t border-zinc-850/80 text-[10.5px]">
-                      {/* Music Volume Slider */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-zinc-400 font-semibold">Volume:</span>
-                        <input
-                          type="range"
-                          min="0.05"
-                          max="0.8"
-                          step="0.05"
-                          value={bgMusicVolume}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            setBgMusicVolume(val);
-                            if (musicAudioRef.current) {
-                              musicAudioRef.current.volume = val;
-                            }
-                          }}
-                          className="w-16 h-1.5 rounded-lg bg-zinc-800 accent-rose-500 cursor-pointer"
-                          title={`Music Volume: ${Math.round(bgMusicVolume * 100)}%`}
-                        />
-                        <span className="font-mono text-zinc-300 font-bold w-7 text-right">
-                          {Math.round(bgMusicVolume * 100)}%
-                        </span>
-                      </div>
-
-                      {/* Auto-Ducking Speech Priority Toggle */}
-                      <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 select-none">
-                        <input
-                          type="checkbox"
-                          checked={autoDucking}
-                          onChange={(e) => setAutoDucking(e.target.checked)}
-                          className="w-3.5 h-3.5 rounded bg-zinc-900 border-zinc-700 accent-rose-500 cursor-pointer"
-                        />
-                        <span className="font-bold text-zinc-300 hover:text-white transition-colors" title="Automatically lowers background music during voice speech so speech remains 100% crisp and clear">
-                          Auto-Duck Dialogue 🎙️
-                        </span>
-                      </label>
-                    </div>
-                  )}
                 </div>
-
-                {/* Primary Action Buttons */}
-                <div className="w-full flex flex-col gap-2.5">
-                  {/* Option 1: Direct Folder Save (No ZIP) */}
-                  <button
-                    type="button"
-                    onClick={handleSaveDirectlyToFolder}
-                    disabled={isFolderExporting}
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 active:scale-95 transition-all cursor-pointer"
-                  >
-                    {isFolderExporting ? (
-                      <>
-                        <RefreshCw size={14} className="animate-spin text-white" />
-                        <span>{folderProgressMsg || 'Saving directly into folder...'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <FolderDown size={15} />
-                        <span>📁 Save All ({clips.length}) Directly to Folder (No ZIP)</span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* Single Short Fast Render & Download */}
-                  <button
-                    type="button"
-                    onClick={handleRenderShort}
-                    disabled={isRendering}
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 hover:to-red-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-rose-500/25 active:scale-95 transition-all cursor-pointer"
-                  >
-                    {isRendering ? (
-                      <>
-                        <RefreshCw size={14} className="animate-spin" />
-                        <span>{renderProgressMsg || 'Rendering 9:16 Short...'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={15} />
-                        <span>⚡ Fast Download This Short (MP4)</span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* Single Render Smooth Progress Track */}
-                  {isRendering && (
-                    <div className="w-full p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/30 flex flex-col gap-1.5 animate-in fade-in">
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span className="text-rose-300 flex items-center gap-1.5">
-                          <RefreshCw size={12} className="animate-spin text-rose-400" />
-                          <span>{renderProgressMsg || 'Rendering short...'}</span>
-                        </span>
-                        <span className="font-mono text-rose-400 font-black">{Math.round(renderDisplayPercent)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-rose-500 to-amber-400 transition-all duration-150 ease-out rounded-full"
-                          style={{ width: `${Math.min(100, Math.max(2, renderDisplayPercent))}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 1-Click Download ALL Clips in a ZIP bundle */}
-                  <button
-                    type="button"
-                    onClick={handleDownloadAllZip}
-                    disabled={isBatchRendering}
-                    className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-750 hover:border-zinc-700 disabled:opacity-50 text-zinc-300 hover:text-white text-xs font-bold tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
-                  >
-                    {isBatchRendering ? (
-                      <>
-                        <RefreshCw size={14} className="animate-spin text-emerald-400" />
-                        <span>{batchProgressMsg || 'Packaging all clips into ZIP...'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Archive size={14} className="text-emerald-400" />
-                        <span>Download as ZIP Archive</span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* Batch ZIP Smooth Progress Track */}
-                  {isBatchRendering && (
-                    <div className="w-full p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 flex flex-col gap-1.5 animate-in fade-in">
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span className="text-emerald-300 flex items-center gap-1.5">
-                          <RefreshCw size={12} className="animate-spin text-emerald-400" />
-                          <span>{batchProgressMsg || 'Packaging ZIP...'}</span>
-                        </span>
-                        <span className="font-mono text-emerald-400 font-black">{Math.round(batchDisplayPercent)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-150 ease-out rounded-full"
-                          style={{ width: `${Math.min(100, Math.max(2, batchDisplayPercent))}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {exportedFolderPath && (
-                    <button
-                      type="button"
-                      onClick={handleOpenServerFolder}
-                      className="w-full py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
-                    >
-                      <FolderOpen size={14} />
-                      <span>Open Folder in File Explorer 📂</span>
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleSendToTimeline}
-                    className="w-full py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
-                  >
-                    <Sliders size={13} />
-                    <span>Open in Timeline Editor</span>
-                  </button>
-                </div>
-
-                {/* Batch ZIP Ready Alert */}
-                {batchDownloadUrl && (
-                  <div className="w-full p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between gap-3 text-xs animate-in fade-in">
-                    <div className="flex items-center gap-2 text-emerald-400 font-bold truncate">
-                      <Archive size={16} />
-                      <span className="truncate">All Shorts ZIP Ready!</span>
-                    </div>
-                    <a
-                      href={batchDownloadUrl}
-                      download={`${(job?.videoInfo?.title || 'cinemiq').replace(/[\\/:*?"<>|#]/g, ' ').trim()}-shorts.zip`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
-                    >
-                      Save ZIP
-                    </a>
-                  </div>
-                )}
-
-                {/* Single Render Success / Download Link */}
-                {renderedDownloadUrl && (
-                  <div className="w-full p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 flex items-center justify-between gap-3 text-xs animate-in fade-in">
-                    <div className="flex items-center gap-2 text-rose-300 font-bold truncate">
-                      <CheckCircle2 size={16} className="text-emerald-400" />
-                      <span className="truncate">Short MP4 Ready!</span>
-                    </div>
-                    <a
-                      href={renderedDownloadUrl}
-                      download={getFullShortFilename(job?.videoInfo?.title, activeClip?.title)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-black uppercase text-[10px] tracking-wider transition-all shrink-0"
-                    >
-                      Save MP4
-                    </a>
-                  </div>
-                )}
               </div>
             </div>
           </div>
