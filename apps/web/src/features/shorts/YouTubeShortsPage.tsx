@@ -148,10 +148,23 @@ const DEMO_PRESETS = [
   },
 ];
 
+const sanitizeShortTitle = (s?: string) => {
+  if (!s) return 'Highlight';
+  return s
+    .replace(/\s*\(Part\s*\d+\)/gi, '')
+    .replace(/\s*Part\s*\d+/gi, '')
+    .replace(/\s*#\d+/g, '')
+    .replace(/^[0-9]+[\.\-\:\s]+/, '')
+    .replace(/\s*-\s*\d+$/, '')
+    .replace(/\s*:\s*\d+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Highlight';
+};
+
 // Helper to construct exact title filename matching what is written on the page after generation
 const getFullShortFilename = (
   clipTitle?: string,
-  index?: number
+  _index?: number
 ): string => {
   const cleanStr = (s?: string) =>
     (s || '')
@@ -159,8 +172,8 @@ const getFullShortFilename = (
       .replace(/\s+/g, ' ')
       .trim();
 
-  let name = cleanStr(clipTitle);
-  if (!name) name = `Short-${(index ?? 0) + 1}`;
+  let name = cleanStr(sanitizeShortTitle(clipTitle));
+  if (!name) name = 'Highlight';
   if (name.length > 100) name = name.substring(0, 100).trim();
   return `${name}.mp4`;
 };
@@ -255,8 +268,16 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isLooping, setIsLooping] = useState<boolean>(true);
 
-  // Active clip helper
-  const clips = job?.clips || [];
+  // Active clip helper with automatic numberings and parts stripped
+  const rawClips = job?.clips || [];
+  const clips = React.useMemo(() => {
+    return rawClips.map((c) => ({
+      ...c,
+      title: sanitizeShortTitle(c.title),
+      suggestedHeadline: c.suggestedHeadline ? sanitizeShortTitle(c.suggestedHeadline).toUpperCase() : '',
+      titleVariants: (c.titleVariants || []).map((t) => sanitizeShortTitle(t)),
+    }));
+  }, [rawClips]);
   const activeClip = clips.find((c) => c.id === selectedClipId) || clips[0] || null;
 
   // Active clip current start & end (with local trims applied)

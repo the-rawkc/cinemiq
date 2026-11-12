@@ -242,6 +242,90 @@ function getYtDlpBinary(): string {
 }
 
 /**
+ * Check for YouTube cookies in uploads, project root, or via YOUTUBE_COOKIES environment variable
+ */
+function getCookieArgs(uploadsDir: string): string[] {
+  if (process.env.YOUTUBE_COOKIES) {
+    try {
+      const cFile = path.join(uploadsDir, 'cookies.txt');
+      if (!fs.existsSync(cFile) || fs.statSync(cFile).size < 10) {
+        fs.writeFileSync(cFile, process.env.YOUTUBE_COOKIES, 'utf-8');
+      }
+    } catch {}
+  }
+  const possibleCookies = [
+    path.join(uploadsDir, 'cookies.txt'),
+    path.join(uploadsDir, 'youtube_cookies.txt'),
+    path.resolve(process.cwd(), 'cookies.txt'),
+  ];
+  for (const cPath of possibleCookies) {
+    if (fs.existsSync(cPath)) {
+      return ['--cookies', cPath];
+    }
+  }
+  return [];
+}
+
+/**
+ * Strips all numberings, part numbers, and counter suffixes from titles
+ * e.g. "The Heated Debate (Part 1)" -> "The Heated Debate"
+ * e.g. "Viral Highlight #2" -> "Viral Highlight"
+ * e.g. "1. Shocking Secret" -> "Shocking Secret"
+ */
+function cleanClipTitle(rawTitle: string, fallback: string = 'Highlight Moment'): string {
+  if (!rawTitle) return fallback;
+  let cleaned = rawTitle
+    .replace(/\s*\(Part\s*\d+\)/gi, '')
+    .replace(/\s*Part\s*\d+/gi, '')
+    .replace(/\s*#\d+/g, '')
+    .replace(/^[0-9]+[\.\-\:\s]+/, '')
+    .replace(/\s*-\s*\d+$/, '')
+    .replace(/\s*:\s*\d+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || fallback;
+}
+
+/**
+ * Strips all numberings from overlay headlines
+ */
+function cleanHeadline(rawHeadline: string, fallback: string = 'VIRAL HIGHLIGHT'): string {
+  if (!rawHeadline) return fallback;
+  let cleaned = rawHeadline
+    .replace(/\s*\(Part\s*\d+\)/gi, '')
+    .replace(/\s*Part\s*\d+/gi, '')
+    .replace(/\s*#\d+/g, '')
+    .replace(/^[0-9]+[\.\-\:\s]+/, '')
+    .replace(/\s*-\s*\d+$/, '')
+    .replace(/\s*:\s*\d+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.toUpperCase() || fallback;
+}
+
+/**
+ * Ensures strict non-overlap between a candidate clip and all accepted clips
+ */
+function hasOverlapWithAccepted(
+  candidateStart: number,
+  candidateEnd: number,
+  acceptedList: Array<{ startTime: number; endTime: number }>,
+  maxOverlapSeconds: number = 4
+): boolean {
+  for (const acc of acceptedList) {
+    const oStart = Math.max(candidateStart, acc.startTime);
+    const oEnd = Math.min(candidateEnd, acc.endTime);
+    if (oEnd > oStart) {
+      const overlapDur = oEnd - oStart;
+      if (overlapDur > maxOverlapSeconds) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Parse WebVTT subtitle file into rich timestamped segments with word-level cues
  */
 function parseVTTFile(filePath: string): TranscriptSegment[] {
@@ -876,6 +960,7 @@ export const ShortsService = {
     // 3. Download subtitles using yt-dlp with resilient clients and 15s timeout
     try {
       const vttTemplate = path.join(uploadsDir, `yt-${sanitizedId}.%(ext)s`);
+      const cookieArgs = getCookieArgs(uploadsDir);
       const args = [
         '--js-runtimes',
         'node',
@@ -889,28 +974,16 @@ export const ShortsService = {
         '--no-playlist',
         '--no-warnings',
         '--extractor-args',
-        'youtube:player_client=mweb,android,web',
+        'youtube:player_client=android,ios,mweb',
         '--user-agent',
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
         '--socket-timeout',
         '20',
+        ...cookieArgs,
         '-o',
         vttTemplate,
         url,
       ];
-
-      // Check for optional cookies to bypass YouTube bot limits
-      const possibleCookies = [
-        path.join(uploadsDir, 'cookies.txt'),
-        path.join(uploadsDir, 'youtube_cookies.txt'),
-        path.resolve(process.cwd(), 'cookies.txt'),
-      ];
-      for (const cPath of possibleCookies) {
-        if (fs.existsSync(cPath)) {
-          args.splice(1, 0, '--cookies', cPath);
-          break;
-        }
-      }
 
       await new Promise<void>((resolve) => {
         const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
@@ -1079,6 +1152,7 @@ export const ShortsService = {
 
     await new Promise<void>((resolve, reject) => {
       const outputTemplate = path.join(uploadsDir, `yt-${sanitizedId}.%(ext)s`);
+      const cookieArgs = getCookieArgs(uploadsDir);
       const dlArgs = [
         '--js-runtimes',
         'node',
@@ -1096,10 +1170,17 @@ export const ShortsService = {
         'mp4',
         '--no-playlist',
         '--no-abort-on-error',
+        '--extractor-args',
+        'youtube:player_client=android,ios,mweb',
+        '--user-agent',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+        '--socket-timeout',
+        '30',
         '--retry-sleep',
         'exp=1:10',
         '--retries',
         '3',
+        ...cookieArgs,
         '-o',
         outputTemplate,
         url,
@@ -1208,6 +1289,8 @@ export const ShortsService = {
 
   /**
    * AI Analysis using OpenAI GPT or intelligent algorithmic sentence-snapped fallback
+   * Strictly skips video intro & outro, eliminates duplicates, groups coherent speech paragraphs,
+   * and removes all counter/number suffixes.
    */
   async detectViralMoments(
     info: VideoInfo,
@@ -1229,43 +1312,116 @@ export const ShortsService = {
       maxLen = 58;
     }
 
-    // Try OpenAI if configured and we have transcript text
-    if (openai && transcript.length > 5) {
+    // 1. Calculate Intro & Outro Skips (never count channel intros, sponsor plugs, or outro credits)
+    let introSkip = 0;
+    let outroSkip = 0;
+    if (duration >= 600) {
+      introSkip = Math.max(60, Math.min(150, Math.round(duration * 0.08)));
+      outroSkip = Math.max(45, Math.min(90, Math.round(duration * 0.05)));
+    } else if (duration >= 300) {
+      introSkip = Math.max(40, Math.min(75, Math.round(duration * 0.08)));
+      outroSkip = Math.max(30, Math.min(50, Math.round(duration * 0.05)));
+    } else if (duration >= 120) {
+      introSkip = 25;
+      outroSkip = 20;
+    } else if (duration >= 60) {
+      introSkip = Math.round(duration * 0.1);
+      outroSkip = Math.round(duration * 0.06);
+    }
+
+    const maxUsableTime = Math.max(introSkip + minLen + 5, duration - outroSkip);
+
+    // 2. Filter transcript strictly within the core content window [introSkip, maxUsableTime]
+    const coreTranscript = transcript.filter(
+      (s) => s.start >= introSkip && s.end <= maxUsableTime && s.text && s.text.trim().length > 1
+    );
+
+    // 3. Cluster into continuous, meaningful dialogue paragraphs (20-38s each)
+    // NEVER sample individual lines which fractures sentences into senseless gibberish!
+    interface NarrativeSpeechBlock {
+      start: number;
+      end: number;
+      text: string;
+      firstSentence: string;
+    }
+
+    const speechBlocks: NarrativeSpeechBlock[] = [];
+    let curBlockSegs: TranscriptSegment[] = [];
+
+    for (const seg of coreTranscript) {
+      if (curBlockSegs.length === 0) {
+        curBlockSegs.push(seg);
+        continue;
+      }
+      const lastSeg = curBlockSegs[curBlockSegs.length - 1];
+      const blockStart = curBlockSegs[0].start;
+      const blockDur = seg.end - blockStart;
+      const gap = seg.start - lastSeg.end;
+
+      const hasTerminal = /[.?!]$/.test(lastSeg.text.trim());
+      if (blockDur >= 20 && (hasTerminal || gap > 1.5 || blockDur >= 38)) {
+        const text = curBlockSegs.map((s) => s.text.trim()).join(' ');
+        speechBlocks.push({
+          start: curBlockSegs[0].start,
+          end: lastSeg.end,
+          text,
+          firstSentence: curBlockSegs[0].text.trim(),
+        });
+        curBlockSegs = [seg];
+      } else {
+        curBlockSegs.push(seg);
+      }
+    }
+    if (curBlockSegs.length > 0) {
+      const lastSeg = curBlockSegs[curBlockSegs.length - 1];
+      speechBlocks.push({
+        start: curBlockSegs[0].start,
+        end: lastSeg.end,
+        text: curBlockSegs.map((s) => s.text.trim()).join(' '),
+        firstSentence: curBlockSegs[0].text.trim(),
+      });
+    }
+
+    // Try OpenAI if configured and we have valid speech blocks
+    if (openai && speechBlocks.length > 0) {
       try {
-        console.log(`🤖 [Shorts AI] Querying OpenAI for ${clipCount} viral clips across duration ${duration}s...`);
-        let sampledTranscript = transcript;
-        if (transcript.length > 300) {
-          const step = Math.ceil(transcript.length / 300);
-          sampledTranscript = transcript.filter((_, idx) => idx % step === 0);
+        console.log(`🤖 [Shorts AI] Querying OpenAI for ${clipCount} viral clips across window ${introSkip}s-${Math.round(maxUsableTime)}s...`);
+
+        // Sample whole narrative blocks if necessary (preserving entire stories/sentences)
+        let sampledBlocks = speechBlocks;
+        if (speechBlocks.length > 40) {
+          const step = Math.ceil(speechBlocks.length / 40);
+          sampledBlocks = speechBlocks.filter((_, idx) => idx % step === 0);
         }
 
-        const transcriptText = sampledTranscript
-          .map((s) => `[${Math.round(s.start)}s - ${Math.round(s.end)}s] ${s.text}`)
-          .join('\n');
+        const transcriptText = sampledBlocks
+          .map((b) => `[${Math.round(b.start)}s - ${Math.round(b.end)}s]\n${b.text}`)
+          .join('\n\n');
 
         const prompt = `You are an elite YouTube Shorts, TikTok, and Instagram Reels editor.
-Your mission is to find the top ${clipCount} most viral, addictive, high-retention moments from this video transcript.
-Ensure the clips are well distributed throughout the video (early hooks, middle peaks, climax moments, takeaways).
+Your mission is to select the top ${clipCount} most viral, addictive, high-retention moments from this video.
+Ensure the clips are well distributed throughout the usable conversation.
 
 Video Title: "${info.title}"
 Total Duration: ${Math.round(duration)} seconds
+USABLE CONTENT WINDOW: Strictly from ${Math.round(introSkip)}s to ${Math.round(maxUsableTime)}s.
 Desired Clip Length: Between ${minLen} and ${maxLen} seconds.
 
-Rules:
-1. Every clip must start with a powerful HOOK (curiosity, controversial claim, shocking fact, or emotion).
-2. Look for complete thoughts, jokes, revelations, or punchy stories that work independently as a 9:16 vertical short.
-3. Keep startTime and endTime strictly within 0 and ${Math.round(duration)}.
-4. Clip duration must be between ${minLen} and ${maxLen} seconds.
+CRITICAL RULES (MUST FOLLOW STRICTLY):
+1. SKIP INTRO AND OUTRO: DO NOT pick any content before ${Math.round(introSkip)}s (channel intros, greetings, sponsor plugs) or after ${Math.round(maxUsableTime)}s (outro, credits, subscribe buttons).
+2. ZERO DUPLICATE OR OVERLAPPING SHORTS: Every clip must cover a completely separate, unique timestamp range. Do NOT allow any two clips to overlap.
+3. MEANINGFUL & COMPLETE THOUGHTS: Every clip MUST make complete sense independently. It must contain a clear setup, escalation/insight, and punchy conclusion. NEVER cut off mid-sentence or mid-thought.
+4. NO NUMBERINGS IN TITLES OR HEADLINES: DO NOT include "#1", "#2", "Part 1", "Part 2", "Clip 1", or trailing numbers anywhere. Give every clip an authentic, punchy standalone title describing the actual moment.
 5. Provide a virality score between 80 and 99.
-6. Provide a punchy "suggestedHeadline" for the video overlay (e.g. "WAIT TILL THE END 😱" or "HOW HE ACTUALLY DID IT 🔥").
+6. Provide a punchy "suggestedHeadline" for the video overlay without any numbering (e.g. "WAIT TILL THE END 😱" or "HOW HE ACTUALLY DID IT 🔥").
 
 Respond strictly with valid JSON conforming to this schema:
 {
   "clips": [
     {
-      "title": "Catchy title with emoji",
-      "startTime": 12.5,
-      "endTime": 42.0,
+      "title": "Descriptive Standalone Title (NO numbers or parts)",
+      "startTime": ${Math.round(introSkip + 15)},
+      "endTime": ${Math.round(introSkip + 15 + minLen + 10)},
       "viralityScore": 96,
       "reason": "Why this moment retains viewer attention",
       "hook": "First spoken sentence or thought",
@@ -1289,11 +1445,29 @@ ${transcriptText}`;
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed.clips) && parsed.clips.length > 0) {
-            const aiClips = parsed.clips.map((c: any, index: number) => {
-              const start = Math.max(0, parseFloat(c.startTime) || 0);
-              const end = Math.min(duration, parseFloat(c.endTime) || minLen);
+            const acceptedClips: ViralClip[] = [];
+
+            for (const c of parsed.clips) {
+              let start = Math.max(introSkip, parseFloat(c.startTime) || introSkip);
+              let end = Math.min(maxUsableTime, parseFloat(c.endTime) || (start + minLen));
+              if (end - start < minLen) {
+                end = Math.min(maxUsableTime, start + minLen);
+              }
+              if (end - start > maxLen) {
+                end = start + maxLen;
+              }
+              if (start >= maxUsableTime || end <= introSkip || end - start < 8) {
+                continue;
+              }
+
+              // De-duplication check: reject if overlapping with any already accepted clip
+              if (hasOverlapWithAccepted(start, end, acceptedClips, 4)) {
+                console.log(`⏩ [Shorts AI] Skipping overlapping clip candidate (${start}s - ${end}s)`);
+                continue;
+              }
+
               const clipSegs = transcript.filter((s) => s.end > start && s.start < end);
-              const clipDur = Math.max(10, end - start);
+              const clipDur = Math.max(8, end - start);
 
               // Speech metrics & pacing analysis
               const textContent = clipSegs.map((s) => s.text).join(' ');
@@ -1317,18 +1491,19 @@ ${transcriptText}`;
                 '💡 Save & Bookmark Worthy',
                 '🔥 Viral Hook Retention Peak',
               ];
-              const engagementType = engagementArchetypes[index % engagementArchetypes.length];
+              const engagementType = engagementArchetypes[acceptedClips.length % engagementArchetypes.length];
 
               const hookQuote = c.hook || (clipSegs[0]?.text ? `"${clipSegs[0].text}..."` : 'Opening hook from speech');
-              const headline = c.suggestedHeadline || c.title?.toUpperCase() || "DON'T MISS THIS ⚡";
+              const rawTitle = cleanClipTitle(c.title, 'Highlight Moment');
+              const headline = cleanHeadline(c.suggestedHeadline || c.title, "DON'T MISS THIS ⚡");
 
               const rawKeywords = words
                 .map((w) => w.replace(/[^a-zA-Z]/g, ''))
-                .filter((w) => w.length >= 4 && !['this', 'that', 'with', 'from', 'have', 'were', 'what', 'then'].includes(w.toLowerCase()));
+                .filter((w) => w.length >= 4 && !['this', 'that', 'with', 'from', 'have', 'were', 'what', 'then', 'they', 'just', 'there'].includes(w.toLowerCase()));
               const keyTopics = Array.from(new Set(rawKeywords)).slice(0, 5);
 
               const titleVariants = [
-                c.title || `Viral Highlight #${index + 1}`,
+                rawTitle,
                 headline,
                 `Wait till you hear this part... 😱`,
               ];
@@ -1336,9 +1511,9 @@ ${transcriptText}`;
               const channelTag = (info.channel || 'creator').replace(/[^a-zA-Z0-9]/g, '');
               const recommendedDescription = `🚨 Watch till the end: ${c.reason || 'This moment had everyone talking.'}\n\n"${hookQuote}"\n\n👇 What do you think about this? Let us know in the comments!\n\n#shorts #${channelTag} #viral #trending #reels #fyp`;
 
-              return {
-                id: `clip-${index + 1}-${Math.random().toString(36).substring(2, 6)}`,
-                title: c.title || `Viral Highlight #${index + 1}`,
+              acceptedClips.push({
+                id: `clip-${acceptedClips.length + 1}-${Math.random().toString(36).substring(2, 6)}`,
+                title: rawTitle,
                 startTime: Math.round(start * 10) / 10,
                 endTime: Math.round(end * 10) / 10,
                 duration: Math.round(clipDur * 10) / 10,
@@ -1366,16 +1541,27 @@ ${transcriptText}`;
                 recommendedDescription,
                 titleVariants,
                 keyTopics: keyTopics.length > 0 ? keyTopics : ['Viral', 'Moments', 'Trending'],
-              };
-            });
+              });
 
-            if (aiClips.length >= clipCount) {
-              return aiClips.slice(0, clipCount);
+              if (acceptedClips.length >= clipCount) break;
             }
 
-            const algorithmicFill = this.generateAlgorithmicClips(info, transcript, clipCount, minLen, maxLen);
-            const combined = [...aiClips, ...algorithmicFill.slice(aiClips.length)];
-            return combined.slice(0, clipCount);
+            if (acceptedClips.length >= clipCount) {
+              return acceptedClips;
+            }
+
+            // Fill missing slots algorithmically without duplicate clips or numberings
+            const fillClips = this.generateAlgorithmicClips(
+              info,
+              transcript,
+              clipCount,
+              minLen,
+              maxLen,
+              acceptedClips,
+              introSkip,
+              maxUsableTime
+            );
+            return [...acceptedClips, ...fillClips].slice(0, clipCount);
           }
         }
       } catch (err: any) {
@@ -1384,195 +1570,187 @@ ${transcriptText}`;
     }
 
     // Meaningful sentence-snapped algorithmic highlight partitioner
-    console.log(`⚡ [Shorts AI] Generating ${clipCount} viral clips across ${duration}s using sentence-snapped partitioner...`);
-    return this.generateAlgorithmicClips(info, transcript, clipCount, minLen, maxLen);
+    console.log(`⚡ [Shorts AI] Generating ${clipCount} viral clips across ${introSkip}s-${Math.round(maxUsableTime)}s using sentence-snapped partitioner...`);
+    return this.generateAlgorithmicClips(info, transcript, clipCount, minLen, maxLen, [], introSkip, maxUsableTime);
   },
 
   /**
    * Algorithmic highlight detector: extracts meaningful, complete thought segments
    * Snaps startTime to sentence openings and endTime to terminal punctuation (.?!)
-   * Attaches word-level timestamp cues for kinetic lyric motion graphics
+   * Strictly excludes intro & outro, eliminates duplicates, and removes all numberings/parts.
    */
   generateAlgorithmicClips(
     info: VideoInfo,
     transcript: TranscriptSegment[],
     count: number,
     minLen: number,
-    maxLen: number
+    maxLen: number,
+    existingClips: ViralClip[] = [],
+    introSkipOverride?: number,
+    maxUsableTimeOverride?: number
   ): ViralClip[] {
     const totalDuration = info.duration > 0 ? info.duration : 120;
     const clips: ViralClip[] = [];
 
     const archetypes = [
       {
-        titleSuffix: 'The Cold Opening Hook 💥',
+        title: 'Cold Opening Hook 💥',
         headline: 'THEY NEVER SAW THIS COMING 😱',
-        reason: 'Immediate curiosity gap in the first minutes.',
+        reason: 'Immediate curiosity gap in the conversation.',
         score: 98,
       },
       {
-        titleSuffix: 'First Guest Intro & Energy 🔥',
-        headline: 'HE CAME READY WITH SMOKE 🔥',
-        reason: 'High energy persona dynamic and sharp introduction.',
-        score: 96,
-      },
-      {
-        titleSuffix: 'The Core Truth Revelation 💡',
+        title: 'Core Truth Revelation 💡',
         headline: 'WHAT NOBODY WANTS TO ADMIT 🤫',
         reason: 'Psychological intrigue and surprising viewpoint.',
         score: 97,
       },
       {
-        titleSuffix: 'Unfiltered Banter & Roast 😂',
+        title: 'Unfiltered Banter 😂',
         headline: 'EVERYONE LOST THEIR MINDS HERE 💀',
         reason: 'Peak comedic timing and viral shareability.',
         score: 95,
       },
       {
-        titleSuffix: 'The Heated Debate ⚡',
+        title: 'The Heated Debate ⚡',
         headline: 'THINGS JUST GOT INTENSE 🥊',
         reason: 'High-stakes conflict that triggers debate in comments.',
         score: 94,
       },
       {
-        titleSuffix: 'Controversial Statement 🚨',
+        title: 'Controversial Statement 🚨',
         headline: 'DID HE ACTUALLY JUST SAY THAT? 🤯',
         reason: 'Jaw-dropping remark with maximum replay value.',
         score: 96,
       },
       {
-        titleSuffix: 'Unexpected Plot Twist 🔄',
+        title: 'Unexpected Plot Twist 🔄',
         headline: 'WAIT FOR THE SUDDEN TWIST 👀',
         reason: 'Complete narrative subversion that boosts watch time.',
         score: 93,
       },
       {
-        titleSuffix: 'Mid-Episode Showstopper 🌟',
-        headline: 'THE BEST MOMENT OF THE WHOLE SHOW 🔥',
+        title: 'Mid-Episode Showstopper 🌟',
+        headline: 'THE BEST MOMENT OF THE SHOW 🔥',
         reason: 'Highest energy moment of the entire discussion.',
         score: 95,
       },
       {
-        titleSuffix: 'The Wild Room Reaction 🤯',
+        title: 'The Wild Room Reaction 🤯',
         headline: 'THE ENTIRE ROOM COLLAPSED 🤣',
         reason: 'Viral crowd reaction and explosive laughter.',
         score: 92,
       },
       {
-        titleSuffix: 'Hidden Secret Exposed 🗝️',
+        title: 'Hidden Secret Exposed 🗝️',
         headline: 'THE SECRET THEY TRIED TO HIDE 🤐',
         reason: 'Exclusive behind-the-scenes insider knowledge.',
         score: 94,
       },
       {
-        titleSuffix: 'Savage Comeback / Mic Drop 🎯',
+        title: 'Savage Mic Drop 🎯',
         headline: 'THE COLDEST COMEBACK EVER 💀',
         reason: 'Instant punchline payoff with replay momentum.',
         score: 93,
       },
       {
-        titleSuffix: 'High Tension Silence ⏱️',
+        title: 'High Tension Silence ⏱️',
         headline: 'YOU COULD HEAR A PIN DROP 🥶',
         reason: 'Dramatic suspension and suspenseful pacing.',
         score: 91,
       },
       {
-        titleSuffix: 'Unbelievable Story Time 📖',
+        title: 'Unbelievable Story Time 📖',
         headline: 'THE CRAZIEST STORY YOU WILL HEAR 📖',
         reason: 'Addictive narrative flow with strong cliffhanger.',
         score: 94,
       },
       {
-        titleSuffix: 'Emotional Raw Moment ❤️',
+        title: 'Emotional Raw Moment ❤️',
         headline: 'THIS HIT DIFFERENT TO EVERYONE 🥺',
         reason: 'Authentic vulnerability that connects deeply with viewers.',
         score: 90,
       },
       {
-        titleSuffix: 'Million Dollar Advice 🧠',
+        title: 'Million Dollar Advice 🧠',
         headline: 'REMEMBER THIS PIECE OF ADVICE 💰',
         reason: 'High utility value that viewers save and bookmark.',
         score: 95,
       },
       {
-        titleSuffix: 'Pure Chaos Unleashed 🌪️',
-        headline: 'WHEN EVERYTHING WENT COMPLETELY OFF THE RAILS 🚨',
+        title: 'Pure Chaos Unleashed 🌪️',
+        headline: 'WHEN EVERYTHING WENT OFF THE RAILS 🚨',
         reason: 'Unpredictable spontaneous chaos.',
         score: 92,
       },
       {
-        titleSuffix: 'The Ultimate Rebuttal ⚔️',
+        title: 'The Ultimate Rebuttal ⚔️',
         headline: 'HOW TO END AN ENTIRE ARGUMENT 💥',
         reason: 'Decisive rhetoric and sharp logical checkmate.',
         score: 91,
       },
       {
-        titleSuffix: 'Peak Conversational Chemistry 🤝',
-        headline: 'THE CHEMISTRY WAS OUT OF CONTROL ✨',
-        reason: 'Magnetic back-and-forth rhythm and banter.',
-        score: 89,
-      },
-      {
-        titleSuffix: 'The Climax & Turning Point 🚀',
-        headline: 'THIS IS WHERE EVERYTHING CHANGED 🚨',
-        reason: 'Climactic peak that resolves preceding buildup.',
-        score: 96,
-      },
-      {
-        titleSuffix: 'The Shocking Verdict ⚖️',
+        title: 'The Shocking Verdict ⚖️',
         headline: 'THE DECISION NOBODY EXPECTED 😱',
         reason: 'Suspenseful judgment and ultimate reaction.',
         score: 93,
       },
       {
-        titleSuffix: 'Final Golden Nugget 🎯',
+        title: 'Final Golden Nugget 🎯',
         headline: 'PAY CLOSE ATTENTION TO THIS TAKEAWAY 🎯',
         reason: 'Actionable conclusion that drives comment engagement.',
         score: 88,
       },
       {
-        titleSuffix: 'The Masterclass Outro 🎩',
-        headline: 'ENDING ON THE PERFECT NOTE 🎤',
-        reason: 'Memorable sign-off quote that stays with the viewer.',
-        score: 87,
-      },
-      {
-        titleSuffix: 'Audience Favorite Highlight 💎',
+        title: 'Audience Favorite Highlight 💎',
         headline: 'EVERYONE IS TALKING ABOUT THIS PART 🔥',
         reason: 'Identified as a high-density keyword moment.',
         score: 91,
       },
       {
-        titleSuffix: 'Unfiltered Reality ⚡',
+        title: 'Unfiltered Reality ⚡',
         headline: 'THE HARSH REALITY WE MUST FACE ⚡',
         reason: 'No-nonsense direct breakdown of the situation.',
         score: 89,
       },
       {
-        titleSuffix: 'Bonus Viral Blooper 🎬',
+        title: 'Bonus Viral Moment 🎬',
         headline: 'THE PART THEY ALMOST CUT OUT 💀',
         reason: 'Exclusive candid humor and behind-the-scenes charm.',
         score: 90,
       },
     ];
 
-    const safeCount = Math.max(1, Math.min(count, 150));
-    const startMargin = Math.min(15, totalDuration * 0.02);
-    const usableDuration = Math.max(10, totalDuration - startMargin - minLen);
-    const intervalStep = safeCount > 1 ? usableDuration / (safeCount - 1) : 0;
+    // Calculate intro and outro skip bounds
+    let introSkip = introSkipOverride ?? 0;
+    let maxUsableTime = maxUsableTimeOverride ?? totalDuration;
 
-    for (let i = 0; i < safeCount; i++) {
-      const template = archetypes[i % archetypes.length];
-      const cycle = Math.floor(i / archetypes.length);
-      const partSuffix = cycle > 0 ? ` (Part ${cycle + 1})` : '';
+    if (introSkipOverride === undefined) {
+      if (totalDuration >= 600) {
+        introSkip = Math.max(60, Math.min(150, Math.round(totalDuration * 0.08)));
+        maxUsableTime = totalDuration - Math.max(45, Math.min(90, Math.round(totalDuration * 0.05)));
+      } else if (totalDuration >= 300) {
+        introSkip = Math.max(40, Math.min(75, Math.round(totalDuration * 0.08)));
+        maxUsableTime = totalDuration - Math.max(30, Math.min(50, Math.round(totalDuration * 0.05)));
+      } else if (totalDuration >= 120) {
+        introSkip = 25;
+        maxUsableTime = totalDuration - 20;
+      }
+    }
 
+    const usableDuration = Math.max(10, maxUsableTime - introSkip - minLen);
+    const needed = Math.max(1, count - existingClips.length);
+    const step = needed > 1 ? usableDuration / (needed + 1) : usableDuration / 2;
+
+    for (let i = 0; i < needed * 3 && clips.length < needed; i++) {
+      const template = archetypes[(existingClips.length + clips.length) % archetypes.length];
       const targetLength = Math.min(maxLen, Math.max(minLen, 24 + ((i * 5) % 25)));
 
-      let rawStart = Math.round(startMargin + i * intervalStep);
-      if (rawStart + targetLength > totalDuration) {
-        rawStart = Math.max(0, totalDuration - targetLength);
+      let rawStart = Math.round(introSkip + (i * (step * 0.75)));
+      if (rawStart + targetLength > maxUsableTime) {
+        rawStart = Math.max(introSkip, maxUsableTime - targetLength);
       }
-      let rawEnd = Math.min(totalDuration, rawStart + targetLength);
+      let rawEnd = Math.min(maxUsableTime, rawStart + targetLength);
 
       let snappedStart = rawStart;
       let snappedEnd = rawEnd;
@@ -1581,35 +1759,38 @@ ${transcriptText}`;
       // Meaningful Slicing: Snap to natural sentence beginnings and ends
       if (transcript && transcript.length > 0) {
         // Find segment starting closest to rawStart with sentence start preference
-        const nearbyStarts = transcript.filter((t) => Math.abs(t.start - rawStart) <= 8);
+        const nearbyStarts = transcript.filter((t) => t.start >= introSkip && Math.abs(t.start - rawStart) <= 10);
         if (nearbyStarts.length > 0) {
-          // Prefer capitalized segment or one preceded by a sentence terminal (.?!) or pause
           const bestStart =
             nearbyStarts.find((s, idx) => {
               if (idx > 0) {
                 const prev = nearbyStarts[idx - 1];
-                if (/[.?!]$/.test(prev.text.trim()) || s.start - prev.end > 1.0) return true;
+                if (/[.?!]$/.test(prev.text.trim()) || s.start - prev.end > 0.8) return true;
               }
               return /^[A-Z]/.test(s.text.trim());
             }) || nearbyStarts[0];
-          snappedStart = Math.max(0, bestStart.start);
+          snappedStart = Math.max(introSkip, bestStart.start);
         }
 
-        // Find segment ending closest to rawEnd with sentence end preference (.?!)
         const minTargetEnd = snappedStart + minLen;
-        const maxTargetEnd = Math.min(totalDuration, snappedStart + maxLen);
+        const maxTargetEnd = Math.min(maxUsableTime, snappedStart + maxLen);
         const nearbyEnds = transcript.filter((t) => t.end >= minTargetEnd && t.end <= maxTargetEnd + 5);
 
         if (nearbyEnds.length > 0) {
           const bestEnd =
             nearbyEnds.find((s) => /[.?!]$/.test(s.text.trim())) ||
             nearbyEnds[nearbyEnds.length - 1];
-          snappedEnd = Math.min(totalDuration, bestEnd.end);
+          snappedEnd = Math.min(maxUsableTime, bestEnd.end);
         } else {
-          snappedEnd = Math.min(totalDuration, snappedStart + targetLength);
+          snappedEnd = Math.min(maxUsableTime, snappedStart + targetLength);
         }
 
         clipSegments = transcript.filter((t) => t.start >= snappedStart && t.end <= snappedEnd);
+      }
+
+      // Check for overlap against both existing clips and newly added algorithmic clips
+      if (hasOverlapWithAccepted(snappedStart, snappedEnd, [...existingClips, ...clips], 4)) {
+        continue;
       }
 
       // If no speech segments exist (e.g. music video), synthesize rhythmic lyrical cues
@@ -1648,7 +1829,6 @@ ${transcriptText}`;
         hook = `"${clipSegments[0].text}..."`;
       }
 
-      const baseTitle = info.title && info.title !== 'YouTube Video' ? info.title.substring(0, 32) : 'Highlight';
       const clipDur = Math.max(5, snappedEnd - snappedStart);
 
       // Speech metrics & pacing analysis
@@ -1675,7 +1855,7 @@ ${transcriptText}`;
         '⚡ High-Pace Punchline Payoff',
         '🚨 Jaw-Dropping Reality Check',
       ];
-      const engagementType = engagementTypes[i % engagementTypes.length];
+      const engagementType = engagementTypes[(existingClips.length + clips.length) % engagementTypes.length];
 
       // Clean topic keywords from speech & title
       const rawTopics = words
@@ -1689,16 +1869,31 @@ ${transcriptText}`;
         );
       const keyTopics = Array.from(new Set(rawTopics)).slice(0, 5);
 
-      // 3 Title Variants for A/B testing
+      // Derive dynamic title based on spoken speech hook or archetype (NO numberings)
+      let dynamicTitle = template.title;
+      if (clipSegments.length > 0 && clipSegments[0].text) {
+        const spokenWords = clipSegments[0].text
+          .replace(/[^a-zA-Z0-9\s]/g, '')
+          .trim()
+          .split(/\s+/)
+          .slice(0, 6)
+          .join(' ');
+        if (spokenWords.length >= 10 && spokenWords.length <= 45) {
+          dynamicTitle = `${spokenWords} ⚡`;
+        }
+      }
+      const finalTitle = cleanClipTitle(dynamicTitle, template.title);
+      const finalHeadline = cleanHeadline(template.headline, 'MUST WATCH 🔥');
+
+      // Clean Title Variants without any numbers or part numbers
       const titleVariants = [
-        `${baseTitle} - ${template.titleSuffix}${partSuffix}`,
-        `${template.headline}${cycle > 0 ? ` #${i + 1}` : ''}`,
-        `Did they actually say this?! 😱 ${partSuffix}`.trim(),
+        finalTitle,
+        finalHeadline,
+        `Wait till you hear this part... 😱`,
       ];
 
-      // Platform ready description
       const channelTag = (info.channel || 'creator').replace(/[^a-zA-Z0-9]/g, '');
-      const recommendedDescription = `🚨 ${template.headline}\n\n"${hook}"\n\n📌 Breakdown: ${template.reason}\n\n👇 Drop your thoughts below!\n\n#shorts #${channelTag} #viral #trending #reels #fyp #mindblown #podcast`;
+      const recommendedDescription = `🚨 ${finalHeadline}\n\n"${hook}"\n\n📌 Breakdown: ${template.reason}\n\n👇 Drop your thoughts below!\n\n#shorts #${channelTag} #viral #trending #reels #fyp #mindblown #podcast`;
 
       // 12-16 tailored tags per clip
       const clipTags = [
@@ -1708,7 +1903,7 @@ ${transcriptText}`;
         '#reels',
         '#fyp',
         '#foryou',
-        `#${template.titleSuffix.replace(/[^a-zA-Z0-9]/g, '')}`,
+        `#${template.title.replace(/[^a-zA-Z0-9]/g, '')}`,
         ...(channelTag ? [`#${channelTag}`] : []),
         ...keyTopics.map((k) => `#${k}`),
         '#cinemiq',
@@ -1717,15 +1912,15 @@ ${transcriptText}`;
       ].filter((t, idx, arr) => t.length > 2 && arr.indexOf(t) === idx);
 
       clips.push({
-        id: `clip-${i + 1}-${Math.random().toString(36).substring(2, 6)}`,
-        title: `${baseTitle} - ${template.titleSuffix}${partSuffix}`,
+        id: `clip-${existingClips.length + clips.length + 1}-${Math.random().toString(36).substring(2, 6)}`,
+        title: finalTitle,
         startTime: Math.round(snappedStart * 10) / 10,
         endTime: Math.round(snappedEnd * 10) / 10,
         duration: Math.round(clipDur * 10) / 10,
-        viralityScore: Math.max(78, template.score - Math.floor((i % archetypes.length) * 0.3) - (cycle * 2)),
+        viralityScore: Math.max(78, template.score - Math.floor((clips.length % archetypes.length) * 0.3)),
         reason: template.reason,
         hook,
-        suggestedHeadline: `${template.headline}${cycle > 0 ? ` #${i + 1}` : ''}`,
+        suggestedHeadline: finalHeadline,
         tags: clipTags,
         transcriptSegments: clipSegments,
         pacing,
@@ -2008,6 +2203,7 @@ ${transcriptText}`;
     const startStr = new Date(startSec * 1000).toISOString().substring(11, 19);
     const endStr = new Date(endSec * 1000).toISOString().substring(11, 19);
 
+    const cookieArgs = getCookieArgs(uploadsDir);
     const args = [
       '--js-runtimes',
       'node',
@@ -2019,7 +2215,7 @@ ${transcriptText}`;
       '--no-playlist',
       '--no-abort-on-error',
       '--extractor-args',
-      'youtube:player_client=mweb,android,ios',
+      'youtube:player_client=android,ios,mweb',
       '--user-agent',
       'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
       '--socket-timeout',
@@ -2028,23 +2224,11 @@ ${transcriptText}`;
       'exp=1:10',
       '--retries',
       '3',
+      ...cookieArgs,
       '-o',
       outputPath,
       url,
     ];
-
-    // Check for optional cookies to bypass YouTube 429 rate limits
-    const possibleCookies = [
-      path.join(uploadsDir, 'cookies.txt'),
-      path.join(uploadsDir, 'youtube_cookies.txt'),
-      path.resolve(process.cwd(), 'cookies.txt'),
-    ];
-    for (const cPath of possibleCookies) {
-      if (fs.existsSync(cPath)) {
-        args.splice(1, 0, '--cookies', cPath);
-        break;
-      }
-    }
 
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
@@ -2178,7 +2362,7 @@ ${transcriptText}`;
           });
 
           return {
-            title: clip.title || `Short-${clipIndex + 1}`,
+            title: cleanClipTitle(clip.title, 'Highlight'),
             filePath: res.filePath,
           };
         })
@@ -2208,7 +2392,7 @@ ${transcriptText}`;
       const usedNames = new Set<string>();
       for (let idx = 0; idx < renderedFiles.length; idx++) {
         const item = renderedFiles[idx];
-        let cleanName = (item.title || `Short ${idx + 1}`)
+        let cleanName = cleanClipTitle(item.title, 'Highlight')
           .replace(/[\\/:*?"<>|#]/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
@@ -2216,7 +2400,7 @@ ${transcriptText}`;
         if (cleanName.length > 100) cleanName = cleanName.substring(0, 100).trim();
         let entryName = `${cleanName}.mp4`;
         if (usedNames.has(entryName.toLowerCase())) {
-          entryName = `${cleanName} (${idx + 1}).mp4`;
+          entryName = `${cleanName} - Highlight.mp4`;
         }
         usedNames.add(entryName.toLowerCase());
 
@@ -2352,7 +2536,7 @@ ${transcriptText}`;
             autoDucking: params.autoDucking,
           });
 
-          let cleanName = (clip.title || `Short ${clipIndex + 1}`)
+          let cleanName = cleanClipTitle(clip.title, 'Highlight')
             .replace(/[\\/:*?"<>|#]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
