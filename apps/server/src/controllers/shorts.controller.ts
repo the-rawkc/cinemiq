@@ -201,17 +201,25 @@ export const ShortsController = {
       return;
     }
 
-    const cleanFile = fileParam
+    const rawParam = decodeURIComponent(fileParam)
       .replace(/^https?:\/\/[^\/]+/, '')
       .replace(/^\/uploads\/shorts\//, '')
       .replace(/^uploads\/shorts\//, '')
-      .replace(/^.*[\\\/]/, '');
+      .replace(/\.\./g, '') // prevent path traversal
+      .trim();
+
+    const pureFilename = path.basename(rawParam);
 
     const candidates = [
-      path.join(getUploadsDir(), cleanFile),
-      path.resolve(process.cwd(), 'uploads', 'shorts', cleanFile),
-      path.resolve(process.cwd(), '..', 'uploads', 'shorts', cleanFile),
-      path.resolve(process.cwd(), 'apps', 'server', 'uploads', 'shorts', cleanFile),
+      path.join(getUploadsDir(), rawParam),
+      path.resolve(process.cwd(), 'uploads', 'shorts', rawParam),
+      path.resolve(process.cwd(), '..', 'uploads', 'shorts', rawParam),
+      path.resolve(process.cwd(), 'apps', 'server', 'uploads', 'shorts', rawParam),
+      // Also fallback to direct pure filename lookup in case subpath differed
+      path.join(getUploadsDir(), pureFilename),
+      path.resolve(process.cwd(), 'uploads', 'shorts', pureFilename),
+      path.resolve(process.cwd(), '..', 'uploads', 'shorts', pureFilename),
+      path.resolve(process.cwd(), 'apps', 'server', 'uploads', 'shorts', pureFilename),
     ];
 
     let targetPath: string | null = null;
@@ -326,6 +334,8 @@ export const ShortsController = {
         folderPath: result.folderPath,
         totalClips: result.totalClips,
         clips: result.clips,
+        zipUrl: (result as any).zipUrl,
+        zipFilename: (result as any).zipFilename,
       });
     } catch (err: any) {
       console.error('Export folder error:', err);
@@ -342,6 +352,20 @@ export const ShortsController = {
       let targetDir = folderPath;
       if (!targetDir && jobId) {
         targetDir = path.resolve(process.cwd(), 'uploads', 'shorts', `${jobId}-shorts`);
+      }
+
+      const isRemoteServer =
+        Boolean(process.env.RENDER) ||
+        process.env.NODE_ENV === 'production' ||
+        (process.platform === 'linux' && !process.env.DISPLAY);
+
+      if (isRemoteServer) {
+        res.json({
+          success: false,
+          isRemote: true,
+          message: 'Running on remote cloud server. File explorer cannot open on client machine.',
+        });
+        return;
       }
 
       if (!targetDir || !fs.existsSync(targetDir)) {

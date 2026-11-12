@@ -18,7 +18,20 @@ app.use((req, res, next) => {
   console.log(`📡 [${req.method}] ${req.url}`);
   next();
 });
+// Static uploads serving with cross-origin headers
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'apps', 'server', 'uploads')));
+app.use('/uploads', express.static(path.resolve(process.cwd(), '..', 'uploads')));
 
 // Routes
 app.use('/api/ai', aiRoutes);

@@ -33,7 +33,8 @@ import {
   FileText,
   Tag,
   Activity,
-  Share2
+  Share2,
+  AlertTriangle
 } from 'lucide-react';
 import { API_URL } from '../../config';
 
@@ -252,6 +253,11 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [folderTargetPercent, setFolderTargetPercent] = useState(0);
   const [exportedFolderPath, setExportedFolderPath] = useState<string | null>(null);
   const [exportedClips, setExportedClips] = useState<Array<{ title: string; filename: string; url: string; duration: number }>>([]);
+  const [folderExportError, setFolderExportError] = useState<string | null>(null);
+
+  const isLocalEnvironment =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
   // Video Preview & Player Controls State
   const resultsRef = useRef<HTMLDivElement | null>(null);
@@ -1102,18 +1108,21 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const handleSaveDirectlyToFolder = async () => {
     if (!job?.id || clips.length === 0) return;
     if (!job?.videoUrl) {
-      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Folder export will be available in moments!`);
+      setFolderExportError(
+        `High-speed stream is caching in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Please wait a moment until stream finishes caching, then click export!`
+      );
       return;
     }
 
     setIsFolderExporting(true);
+    setFolderExportError(null);
     setFolderDisplayPercent(0);
     setFolderTargetPercent(15);
     setFolderProgressMsg(`Preparing folder export in ${targetResolution.toUpperCase()} mode...`);
     setErrorMessage(null);
 
     const folderRenderTimer = setInterval(() => {
-      setFolderTargetPercent((prev) => Math.min(45, prev + 5));
+      setFolderTargetPercent((prev) => Math.min(48, prev + 4));
     }, 300);
 
     try {
@@ -1127,12 +1136,9 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
             startIn: 'downloads',
           });
         } catch (pickErr: any) {
-          if (pickErr.name === 'AbortError') {
-            clearInterval(folderRenderTimer);
-            setIsFolderExporting(false);
-            return; // user cancelled picker
-          }
-          console.warn('Directory picker fallback:', pickErr);
+          // If user cancels or if permission denied, don't abort!
+          // We will fallback smoothly to automatic ZIP / loose file downloads
+          console.log('Folder picker not selected, using direct download bundle fallback:', pickErr.name);
         }
       }
 
@@ -1171,51 +1177,84 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       clearInterval(folderRenderTimer);
       setExportedFolderPath(data.folderPath);
       setExportedClips(data.clips);
-      setFolderTargetPercent(50);
+      setFolderTargetPercent(55);
+
+      if (data.zipUrl) {
+        setBatchDownloadUrl(`${API_URL}${data.zipUrl}`);
+      }
 
       if (dirHandle) {
         // Stream each MP4 file directly into the user's picked directory
-        for (let i = 0; i < data.clips.length; i++) {
-          const item = data.clips[i];
-          const targetPct = Math.round(50 + (((i + 1) / data.clips.length) * 48));
-          setFolderTargetPercent(targetPct);
-          setFolderProgressMsg(`Saving "${item.filename}" (${i + 1}/${data.clips.length}) into folder...`);
-          const fileRes = await fetch(`${API_URL}${item.url}`);
-          const fileBlob = await fileRes.blob();
-          const fileHandle = await dirHandle.getFileHandle(item.filename, { create: true });
-          const writable = await fileHandle.createWritable();
-          await writable.write(fileBlob);
-          await writable.close();
+        try {
+          for (let i = 0; i < data.clips.length; i++) {
+            const item = data.clips[i];
+            const targetPct = Math.round(55 + (((i + 1) / data.clips.length) * 42));
+            setFolderTargetPercent(targetPct);
+            setFolderProgressMsg(`Saving "${item.filename}" (${i + 1}/${data.clips.length}) into folder...`);
+            const fileRes = await fetch(`${API_URL}${item.url}`);
+            const fileBlob = await fileRes.blob();
+            const fileHandle = await dirHandle.getFileHandle(item.filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(fileBlob);
+            await writable.close();
+          }
+          setFolderTargetPercent(100);
+          setFolderProgressMsg(`✅ All ${data.clips.length} shorts saved directly into your folder!`);
+        } catch (writeErr) {
+          console.warn('Directory handle write error, downloading ZIP archive instead:', writeErr);
+          if (data.zipUrl) {
+            triggerBrowserDownload(`${API_URL}${data.zipUrl}`, data.zipFilename || `cinemiq-shorts-${job.id}.zip`);
+            setFolderTargetPercent(100);
+            setFolderProgressMsg(`✅ Downloaded complete shorts folder package (.zip) to your computer!`);
+          }
         }
-        setFolderTargetPercent(100);
-        setFolderProgressMsg(`✅ All ${data.clips.length} shorts saved directly into your folder!`);
       } else {
-        // Fallback for browsers without File System Access API: trigger direct loose file downloads
-        for (let i = 0; i < data.clips.length; i++) {
-          const item = data.clips[i];
-          const targetPct = Math.round(50 + (((i + 1) / data.clips.length) * 48));
-          setFolderTargetPercent(targetPct);
-          setFolderProgressMsg(`Downloading "${item.filename}" (${i + 1}/${data.clips.length}) to downloads...`);
-          triggerBrowserDownload(`${API_URL}${item.url}`, item.filename);
-          await new Promise((r) => setTimeout(r, 350));
+        // Live cloud environment or browser without directory picker:
+        // Trigger download of the ready companion ZIP archive containing the complete folder
+        if (data.zipUrl) {
+          setFolderTargetPercent(90);
+          setFolderProgressMsg(`Downloading complete folder package (.zip) to your computer...`);
+          triggerBrowserDownload(`${API_URL}${data.zipUrl}`, data.zipFilename || `cinemiq-shorts-${job.id}.zip`);
+          setFolderTargetPercent(100);
+          setFolderProgressMsg(`✅ All ${data.clips.length} shorts downloaded in ready folder archive!`);
+        } else {
+          // Loose file fallback
+          for (let i = 0; i < data.clips.length; i++) {
+            const item = data.clips[i];
+            const targetPct = Math.round(55 + (((i + 1) / data.clips.length) * 42));
+            setFolderTargetPercent(targetPct);
+            setFolderProgressMsg(`Downloading "${item.filename}" (${i + 1}/${data.clips.length}) to downloads...`);
+            triggerBrowserDownload(`${API_URL}${item.url}`, item.filename);
+            await new Promise((r) => setTimeout(r, 350));
+          }
+          setFolderTargetPercent(100);
+          setFolderProgressMsg(`✅ All ${data.clips.length} shorts downloaded to your computer!`);
         }
-        setFolderTargetPercent(100);
-        setFolderProgressMsg(`✅ All ${data.clips.length} loose shorts downloaded directly!`);
       }
 
       setTimeout(() => {
         setIsFolderExporting(false);
-      }, 700);
+      }, 800);
     } catch (err: any) {
       clearInterval(folderRenderTimer);
       console.error('Folder export error:', err);
       setIsFolderExporting(false);
-      setErrorMessage(err.message || 'Failed to save to folder.');
+      setFolderExportError(err.message || 'Failed to save to folder. You can download as ZIP archive instead.');
     }
   };
 
-  // Open the local directory directly in Windows File Explorer / OS file manager
+  // Open the local directory directly on localhost, or download folder package on live environment
   const handleOpenServerFolder = async () => {
+    // If running on a live remote environment, trigger instant direct download of the folder package
+    if (!isLocalEnvironment) {
+      if (batchDownloadUrl) {
+        triggerBrowserDownload(batchDownloadUrl, `cinemiq-shorts-${job?.id || 'all'}.zip`);
+      } else {
+        handleDownloadAllZip();
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`${API_URL}/api/shorts/open-folder`, {
         method: 'POST',
@@ -1226,12 +1265,20 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         }),
       });
       const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || 'Could not open folder on server');
+      if (data.isRemote || !data.success) {
+        if (batchDownloadUrl) {
+          triggerBrowserDownload(batchDownloadUrl, `cinemiq-shorts-${job?.id || 'all'}.zip`);
+        } else {
+          handleDownloadAllZip();
+        }
       }
     } catch (err: any) {
-      console.error('Open folder error:', err);
-      setErrorMessage('Could not open folder directly. Files are stored at: ' + (exportedFolderPath || 'uploads/shorts/'));
+      console.warn('Open folder note, falling back to download:', err);
+      if (batchDownloadUrl) {
+        triggerBrowserDownload(batchDownloadUrl, `cinemiq-shorts-${job?.id || 'all'}.zip`);
+      } else {
+        handleDownloadAllZip();
+      }
     }
   };
 
@@ -2080,20 +2127,49 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     )}
                   </button>
 
-                  {/* Option 3: Open Output Folder in Windows File Explorer */}
+                  {/* Option 3: Open Output Folder in Windows File Explorer / Download Archive */}
                   {exportedFolderPath && (
                     <button
                       type="button"
                       onClick={handleOpenServerFolder}
                       className="px-3.5 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-bold text-[11px] flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
-                      title="Open folder directly in Windows Explorer"
+                      title={isLocalEnvironment ? "Open folder directly in Windows Explorer" : "Download folder bundle as ZIP archive"}
                     >
                       <FolderOpen size={13} />
-                      <span>Open in File Explorer 📂</span>
+                      <span>{isLocalEnvironment ? 'Open in File Explorer 📂' : '📥 Download Folder (.zip)'}</span>
                     </button>
                   )}
                 </div>
               </div>
+
+              {/* In-Place Folder Export Error Alert */}
+              {folderExportError && (
+                <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2 text-red-300 font-bold">
+                    <AlertTriangle size={15} className="text-red-400 shrink-0" />
+                    <span className="text-[11px]">{folderExportError}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFolderExportError(null);
+                        handleDownloadAllZip();
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[10px] tracking-wider transition-all cursor-pointer"
+                    >
+                      Download as ZIP Instead
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFolderExportError(null)}
+                      className="text-red-400 hover:text-white font-bold text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Folder Export Active Progress Alert */}
               {isFolderExporting && (
@@ -2148,7 +2224,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                       onClick={handleOpenServerFolder}
                       className="px-2.5 py-1 rounded-lg bg-blue-500 hover:bg-blue-400 text-white font-bold text-[10px] tracking-wider transition-all cursor-pointer"
                     >
-                      Show Folder on Computer
+                      {isLocalEnvironment ? 'Show Folder on Computer' : '📥 Download All Shorts (.zip)'}
                     </button>
                   </div>
                 </div>
@@ -3238,6 +3314,54 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         )}
                       </button>
 
+                      {/* Folder Export Error Track (Right Column) */}
+                      {folderExportError && (
+                        <div className="w-full p-2.5 rounded-xl bg-red-950/40 border border-red-500/30 flex flex-col gap-1.5 animate-in fade-in text-xs">
+                          <div className="flex items-start gap-1.5 text-red-300">
+                            <AlertTriangle size={13} className="text-red-400 shrink-0 mt-0.5" />
+                            <span className="text-[10.5px] leading-tight">{folderExportError}</span>
+                          </div>
+                          <div className="flex items-center gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFolderExportError(null);
+                                handleDownloadAllZip();
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[10px]"
+                            >
+                              Download as ZIP
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFolderExportError(null)}
+                              className="text-zinc-400 hover:text-white text-[10px]"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Folder Export Smooth Progress Track (Right Column) */}
+                      {isFolderExporting && (
+                        <div className="w-full p-2.5 rounded-xl bg-blue-950/40 border border-blue-500/30 flex flex-col gap-1.5 animate-in fade-in">
+                          <div className="flex items-center justify-between text-[11px] font-bold">
+                            <span className="text-blue-300 flex items-center gap-1.5">
+                              <RefreshCw size={12} className="animate-spin text-blue-400" />
+                              <span>{folderProgressMsg || 'Exporting shorts to folder...'}</span>
+                            </span>
+                            <span className="font-mono text-blue-400 font-black">{Math.round(folderDisplayPercent)}%</span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-zinc-900 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-blue-500 via-indigo-400 to-emerald-400 transition-all duration-150 ease-out rounded-full"
+                              style={{ width: `${Math.min(100, Math.max(2, folderDisplayPercent))}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
                       {/* Single Short Fast Render & Download */}
                       <button
                         type="button"
@@ -3323,7 +3447,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           className="w-full py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
                         >
                           <FolderOpen size={14} />
-                          <span>Open Folder in File Explorer 📂</span>
+                          <span>{isLocalEnvironment ? 'Open Folder in File Explorer 📂' : '📥 Download Folder Archive (.zip)'}</span>
                         </button>
                       )}
 

@@ -1978,8 +1978,28 @@ ${transcriptText}`;
     clipTrims?: Record<string, { start: number; end: number }>;
   }): Promise<{ zipUrl: string; totalClips: number; zipFilename: string }> {
     const job = activeJobs.get(params.jobId);
-    if (!job || !job.videoPath || !fs.existsSync(job.videoPath)) {
-      throw new Error(`Job or source video not found for ID: ${params.jobId}`);
+    if (!job) {
+      throw new Error(`Job not found for ID: ${params.jobId}. Please re-run analysis.`);
+    }
+
+    const uploadsDir = getUploadsDir();
+
+    // Check if videoPath exists; self-heal from disk if needed
+    if (!job.videoPath || !fs.existsSync(job.videoPath)) {
+      const currentFiles = fs.readdirSync(uploadsDir);
+      const sanitizedId = (job.videoInfo?.id || params.jobId).replace(/[^a-zA-Z0-9_\-]/g, '');
+      const matched = currentFiles.find(
+        (f) =>
+          (f.includes(sanitizedId) || f.includes(params.jobId)) &&
+          (f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv')) &&
+          !f.startsWith('short-') &&
+          !f.startsWith('sec-')
+      );
+      if (matched) {
+        job.videoPath = path.join(uploadsDir, matched);
+      } else {
+        throw new Error(`Source video is still buffering or not found on disk for ID: ${params.jobId}`);
+      }
     }
 
     const clips = job.clips || [];
@@ -1988,7 +2008,6 @@ ${transcriptText}`;
     }
 
     const aspectRatio = params.aspectRatio || '9:16-blur';
-    const uploadsDir = getUploadsDir();
     const zipFilename = `cinemiq-shorts-${params.jobId}.zip`;
     const zipPath = path.join(uploadsDir, zipFilename);
 
@@ -2004,9 +2023,10 @@ ${transcriptText}`;
       }
     }
 
-    // Render clips in chunks of 4 for ultra-fast throughput
+    // Adaptive concurrency: 2 on cloud/Linux (to prevent OOM on 512MB RAM), 4 on Windows
+    const isCloudEnv = process.platform !== 'win32' || Boolean(process.env.RENDER) || process.env.NODE_ENV === 'production';
+    const chunkSize = isCloudEnv ? 2 : 4;
     const renderedFiles: Array<{ title: string; filePath: string }> = [];
-    const chunkSize = 4;
 
     for (let i = 0; i < clips.length; i += chunkSize) {
       const chunk = clips.slice(i, i + chunkSize);
@@ -2117,10 +2137,32 @@ ${transcriptText}`;
     folderPath: string;
     totalClips: number;
     clips: Array<{ title: string; filename: string; url: string; duration: number }>;
+    zipUrl?: string;
+    zipFilename?: string;
   }> {
     const job = activeJobs.get(params.jobId);
-    if (!job || !job.videoPath || !fs.existsSync(job.videoPath)) {
-      throw new Error(`Job or source video not found for ID: ${params.jobId}`);
+    if (!job) {
+      throw new Error(`Job not found for ID: ${params.jobId}. Please re-run analysis.`);
+    }
+
+    const uploadsDir = getUploadsDir();
+
+    // Check if job.videoPath exists; self-heal from disk if needed
+    if (!job.videoPath || !fs.existsSync(job.videoPath)) {
+      const currentFiles = fs.readdirSync(uploadsDir);
+      const sanitizedId = (job.videoInfo?.id || params.jobId).replace(/[^a-zA-Z0-9_\-]/g, '');
+      const matched = currentFiles.find(
+        (f) =>
+          (f.includes(sanitizedId) || f.includes(params.jobId)) &&
+          (f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv')) &&
+          !f.startsWith('short-') &&
+          !f.startsWith('sec-')
+      );
+      if (matched) {
+        job.videoPath = path.join(uploadsDir, matched);
+      } else {
+        throw new Error(`Source video is still buffering or not found on disk for ID: ${params.jobId}`);
+      }
     }
 
     const clips = job.clips || [];
@@ -2129,7 +2171,6 @@ ${transcriptText}`;
     }
 
     const aspectRatio = params.aspectRatio || '9:16-blur';
-    const uploadsDir = getUploadsDir();
     const folderName = `${params.jobId}-shorts`;
     const folderPath = path.join(uploadsDir, folderName);
 
@@ -2137,9 +2178,10 @@ ${transcriptText}`;
       fs.mkdirSync(folderPath, { recursive: true });
     }
 
-    // Render clips in parallel chunks
+    // Adaptive concurrency: 2 on cloud/Linux (to prevent OOM on 512MB RAM), 4 on Windows
+    const isCloudEnv = process.platform !== 'win32' || Boolean(process.env.RENDER) || process.env.NODE_ENV === 'production';
+    const chunkSize = isCloudEnv ? 2 : 4;
     const exportedClips: Array<{ title: string; filename: string; url: string; duration: number }> = [];
-    const chunkSize = 4;
 
     const videoTitle = (job.videoInfo?.title || '')
       .replace(/[\\/:*?"<>|#]/g, ' ')
@@ -2248,11 +2290,52 @@ ${transcriptText}`;
     ];
     fs.writeFileSync(path.join(folderPath, 'summary.txt'), summaryLines.join('\n'), 'utf-8');
 
+    // Also package a ready-to-download ZIP archive so cloud/live environments have instant bundle access
+    const zipFilename = `cinemiq-shorts-${folderName}.zip`;
+    const zipPath = path.join(uploadsDir, zipFilename);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const output = fs.createWriteStream(zipPath);
+        let archive: any;
+        if (typeof (archiverModule as any).ZipArchive === 'function') {
+          archive = new (archiverModule as any).ZipArchive({ zlib: { level: 4 } });
+        } else if (typeof (archiverModule as any).default === 'function') {
+          archive = (archiverModule as any).default('zip', { zlib: { level: 4 } });
+        } else if (typeof (archiverModule as any) === 'function') {
+          archive = (archiverModule as any)('zip', { zlib: { level: 4 } });
+        } else {
+          return resolve();
+        }
+
+        output.on('close', () => resolve());
+        archive.on('error', (err: any) => reject(err));
+        archive.pipe(output);
+
+        for (const item of exportedClips) {
+          const itemPath = path.join(folderPath, item.filename);
+          if (fs.existsSync(itemPath)) {
+            archive.file(itemPath, { name: item.filename });
+          }
+        }
+        if (fs.existsSync(path.join(folderPath, 'summary.txt'))) {
+          archive.file(path.join(folderPath, 'summary.txt'), { name: 'summary.txt' });
+        }
+        if (fs.existsSync(path.join(folderPath, 'hashtags.txt'))) {
+          archive.file(path.join(folderPath, 'hashtags.txt'), { name: 'hashtags.txt' });
+        }
+        archive.finalize();
+      });
+    } catch (zipErr) {
+      console.warn('Folder companion zip creation note:', zipErr);
+    }
+
     return {
       folderName,
       folderPath,
       totalClips: exportedClips.length,
       clips: exportedClips,
+      zipUrl: fs.existsSync(zipPath) ? `/uploads/shorts/${zipFilename}` : undefined,
+      zipFilename: fs.existsSync(zipPath) ? zipFilename : undefined,
     };
   },
 
