@@ -1953,10 +1953,34 @@ ${transcriptText}`;
       '-f',
       'best[ext=mp4][height<=720]/best[height<=720]/18/best',
       '--no-playlist',
+      '--no-abort-on-error',
+      '--extractor-args',
+      'youtube:player_client=mweb,android,ios',
+      '--user-agent',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+      '--socket-timeout',
+      '30',
+      '--retry-sleep',
+      'exp=1:10',
+      '--retries',
+      '3',
       '-o',
       outputPath,
       url,
     ];
+
+    // Check for optional cookies to bypass YouTube 429 rate limits
+    const possibleCookies = [
+      path.join(uploadsDir, 'cookies.txt'),
+      path.join(uploadsDir, 'youtube_cookies.txt'),
+      path.resolve(process.cwd(), 'cookies.txt'),
+    ];
+    for (const cPath of possibleCookies) {
+      if (fs.existsSync(cPath)) {
+        args.splice(1, 0, '--cookies', cPath);
+        break;
+      }
+    }
 
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
