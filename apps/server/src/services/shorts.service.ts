@@ -695,7 +695,7 @@ export const ShortsService = {
         '--skip-download',
         '--no-warnings',
         '--extractor-args',
-        'youtube:player_client=android,web',
+        'youtube:player_client=tv,mediaconnect,android,web',
         '--retry-sleep',
         'exp=1:10',
         '--retries',
@@ -974,9 +974,9 @@ export const ShortsService = {
         '--no-playlist',
         '--no-warnings',
         '--extractor-args',
-        'youtube:player_client=android,ios,mweb',
+        'youtube:player_client=tv,mediaconnect,android,ios,mweb',
         '--user-agent',
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1',
         '--socket-timeout',
         '20',
         ...cookieArgs,
@@ -1171,15 +1171,19 @@ export const ShortsService = {
         '--no-playlist',
         '--no-abort-on-error',
         '--extractor-args',
-        'youtube:player_client=android,ios,mweb',
+        'youtube:player_client=tv,mediaconnect,android,ios,mweb',
         '--user-agent',
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1',
         '--socket-timeout',
         '30',
+        '--sleep-requests',
+        '1',
         '--retry-sleep',
-        'exp=1:10',
+        'exp=1:15',
         '--retries',
-        '3',
+        '5',
+        '--fragment-retries',
+        '5',
         ...cookieArgs,
         '-o',
         outputTemplate,
@@ -2333,6 +2337,7 @@ ${transcriptText}`;
     const endStr = new Date(endSec * 1000).toISOString().substring(11, 19);
 
     const cookieArgs = getCookieArgs(uploadsDir);
+    // Use TV client first (best on cloud IPs), fall back through multiple clients
     const args = [
       '--js-runtimes',
       'node',
@@ -2343,16 +2348,21 @@ ${transcriptText}`;
       'best[ext=mp4][height<=720]/best[height<=720]/18/best',
       '--no-playlist',
       '--no-abort-on-error',
+      '--force-ipv4',
       '--extractor-args',
-      'youtube:player_client=android,ios,mweb',
+      'youtube:player_client=tv,mediaconnect,android,ios,mweb',
       '--user-agent',
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+      'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1',
       '--socket-timeout',
       '30',
+      '--sleep-requests',
+      '1',
       '--retry-sleep',
-      'exp=1:10',
+      'exp=1:15',
       '--retries',
-      '3',
+      '5',
+      '--fragment-retries',
+      '5',
       ...cookieArgs,
       '-o',
       outputPath,
@@ -2363,11 +2373,16 @@ ${transcriptText}`;
       const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
       let stderr = '';
       proc.stderr.on('data', (d) => (stderr += d.toString()));
-      proc.on('close', (code) => {
+      proc.on('close', (_code) => {
         if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 10000) {
           resolve();
         } else {
-          reject(new Error(`Failed to download clip section: ${stderr.substring(0, 200)}`));
+          // Give a user-friendly message for 429 rate-limit errors
+          const is429 = stderr.includes('429') || stderr.includes('Too Many Requests');
+          const shortMsg = is429
+            ? 'YouTube rate-limited this server (HTTP 429). Please add YouTube cookies via YOUTUBE_COOKIES env var on Render, or try again in a few minutes.'
+            : `Section download failed: ${stderr.substring(0, 200)}`;
+          reject(new Error(shortMsg));
         }
       });
       proc.on('error', (err) => reject(err));

@@ -372,15 +372,21 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   };
 
   // Reset play state and position whenever active clip changes
+  // Auto-start YouTube embed preview when no local video is ready
   useEffect(() => {
     setIsPlaying(false);
-    setIsEmbedPlaying(false);
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.currentTime = currentStart;
     }
     setCurrentPlayTime(currentStart);
-  }, [selectedClipId]);
+    // If no local video available, auto-activate embed so preview shows immediately
+    if (!job?.videoUrl && ytId) {
+      setIsEmbedPlaying(true);
+    } else {
+      setIsEmbedPlaying(false);
+    }
+  }, [selectedClipId, job?.videoUrl, ytId]);
 
   // Sync Video Playback for active clip
   useEffect(() => {
