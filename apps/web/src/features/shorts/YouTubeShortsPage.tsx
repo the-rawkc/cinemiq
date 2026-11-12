@@ -148,9 +148,8 @@ const DEMO_PRESETS = [
   },
 ];
 
-// Helper to construct complete, full title names for downloads without truncation
+// Helper to construct exact title filename matching what is written on the page after generation
 const getFullShortFilename = (
-  videoTitle?: string,
   clipTitle?: string,
   index?: number
 ): string => {
@@ -160,26 +159,10 @@ const getFullShortFilename = (
       .replace(/\s+/g, ' ')
       .trim();
 
-  const vTitle = cleanStr(videoTitle);
-  const cTitle = cleanStr(clipTitle);
-
-  let full = '';
-  if (vTitle && cTitle) {
-    if (cTitle.toLowerCase().includes(vTitle.toLowerCase())) {
-      full = cTitle;
-    } else {
-      full = `${vTitle} - ${cTitle}`;
-    }
-  } else {
-    full = cTitle || vTitle || `Cinemiq-Short-${(index ?? 0) + 1}`;
-  }
-
-  if (typeof index === 'number') {
-    full = `${String(index + 1).padStart(2, '0')} - ${full}`;
-  }
-
-  if (full.length > 120) full = full.substring(0, 120).trim();
-  return `${full}.mp4`;
+  let name = cleanStr(clipTitle);
+  if (!name) name = `Short-${(index ?? 0) + 1}`;
+  if (name.length > 100) name = name.substring(0, 100).trim();
+  return `${name}.mp4`;
 };
 
 export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
@@ -219,6 +202,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   const [isMusicPreviewPlaying, setIsMusicPreviewPlaying] = useState<boolean>(false);
   const musicAudioRef = useRef<HTMLAudioElement | null>(null);
   const [customHeadlines, setCustomHeadlines] = useState<Record<string, string>>({});
+  const [includeHeadlineBanner, setIncludeHeadlineBanner] = useState<boolean>(false);
   const [clipTrims, setClipTrims] = useState<Record<string, { start: number; end: number }>>({});
   const [copiedAllHashtags, setCopiedAllHashtags] = useState(false);
   const [copiedYTStudio, setCopiedYTStudio] = useState(false);
@@ -894,7 +878,9 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       const trim = clipTrims[clip.id];
       const startTime = trim?.start ?? clip.startTime;
       const endTime = trim?.end ?? clip.endTime;
-      const headlineText = customHeadlines[clip.id] ?? clip.suggestedHeadline ?? '';
+      const headlineText = includeHeadlineBanner
+        ? (customHeadlines[clip.id] ?? clip.suggestedHeadline ?? '')
+        : '';
 
       const res = await fetch(`${API_URL}/api/shorts/render-clip`, {
         method: 'POST',
@@ -936,7 +922,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       setSelectedClipId(clip.id);
       const clipIndex = clips.findIndex((c) => c.id === clip.id);
       const fullFilename = getFullShortFilename(
-        job?.videoInfo?.title,
         clip.title,
         clipIndex >= 0 ? clipIndex : undefined
       );
@@ -977,7 +962,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           bgMusicTrack,
           bgMusicVolume,
           autoDucking,
-          customHeadlines,
+          customHeadlines: includeHeadlineBanner ? customHeadlines : {},
           clipTrims,
         }),
       });
@@ -1049,7 +1034,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           startTime: currentStart,
           endTime: currentEnd,
           aspectRatio,
-          headlineText: currentHeadline,
+          headlineText: includeHeadlineBanner ? currentHeadline : '',
           targetResolution,
           captionStyle,
           bgMusicTrack,
@@ -1084,7 +1069,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
       setRenderedDownloadUrl(fullUrl);
       const clipIndex = clips.findIndex((c) => c.id === activeClip.id);
       const fullFilename = getFullShortFilename(
-        job?.videoInfo?.title,
         activeClip.title,
         clipIndex >= 0 ? clipIndex : undefined
       );
@@ -1146,7 +1130,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
           bgMusicTrack,
           bgMusicVolume,
           autoDucking,
-          customHeadlines,
+          customHeadlines: includeHeadlineBanner ? customHeadlines : {},
           clipTrims,
         }),
       });
@@ -2726,8 +2710,8 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                           </div>
                         )}
 
-                        {/* Simulated Top Headline Banner */}
-                        {currentHeadline && (
+                        {/* Simulated Top Headline Banner (Only shown if enabled) */}
+                        {includeHeadlineBanner && currentHeadline && (
                           <div className="absolute top-8 left-3 right-3 z-20 pointer-events-none">
                             <div className="bg-black/75 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-1.5 text-center shadow-lg">
                               <span className="text-[10px] font-black tracking-wide text-white uppercase drop-shadow">
@@ -2989,9 +2973,19 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                     <div className="w-full p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 flex flex-col gap-2.5 shadow-inner">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-black uppercase tracking-wider text-zinc-200">
-                          Top Headline Text
+                          Top Headline Banner
                         </span>
-                        <span className="text-[9.5px] text-zinc-500">Overlaid at top of short</span>
+                        <button
+                          type="button"
+                          onClick={() => setIncludeHeadlineBanner(!includeHeadlineBanner)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                            includeHeadlineBanner
+                              ? 'bg-rose-500 text-white'
+                              : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                          }`}
+                        >
+                          {includeHeadlineBanner ? 'Enabled (Static Text)' : 'Disabled (Actual Captions Only)'}
+                        </button>
                       </div>
                       <input
                         type="text"
@@ -3481,7 +3475,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
                         </div>
                         <a
                           href={renderedDownloadUrl}
-                          download={getFullShortFilename(job?.videoInfo?.title, activeClip?.title)}
+                          download={getFullShortFilename(activeClip?.title)}
                           target="_blank"
                           rel="noreferrer"
                           className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-black uppercase text-[10px] tracking-wider transition-all shrink-0"

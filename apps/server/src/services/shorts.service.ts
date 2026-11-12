@@ -406,16 +406,61 @@ export function generateAssSubtitles(params: {
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ].join('\n');
 
-  // Filter segments falling inside the clip range
-  const clipSegs = segments.filter((s) => s.end > clipStartTime && s.start < clipEndTime);
+  // Support both full-video absolute timestamps and pre-sliced 0-indexed clips
+  const firstSegStart = segments[0]?.start ?? 0;
+  const isOffsetNeeded = clipStartTime === 0 && firstSegStart >= clipEndTime;
+  const baseOffset = isOffsetNeeded ? firstSegStart : clipStartTime;
+
+  let clipSegs: TranscriptSegment[] = [];
+  if (isOffsetNeeded) {
+    // Segments belong to this clip directly, offset them to start from 0
+    clipSegs = segments.map((s) => ({
+      ...s,
+      start: Math.max(0, s.start - baseOffset),
+      end: Math.max(0.3, s.end - baseOffset),
+      words: s.words
+        ? s.words.map((w) => ({
+            ...w,
+            start: Math.max(0, w.start - baseOffset),
+            end: Math.max(0.1, w.end - baseOffset),
+          }))
+        : undefined,
+    }));
+  } else {
+    // Segments are from full transcript, filter within [clipStartTime, clipEndTime]
+    clipSegs = segments
+      .filter((s) => s.end > clipStartTime && s.start < clipEndTime)
+      .map((s) => ({
+        ...s,
+        start: Math.max(0, s.start - clipStartTime),
+        end: Math.max(0.3, s.end - clipStartTime),
+        words: s.words
+          ? s.words.map((w) => ({
+              ...w,
+              start: Math.max(0, w.start - clipStartTime),
+              end: Math.max(0.1, w.end - clipStartTime),
+            }))
+          : undefined,
+      }));
+  }
+
   if (clipSegs.length === 0) return null;
 
   const events: string[] = [];
 
   for (const seg of clipSegs) {
-    const segStartRel = Math.max(0, seg.start - clipStartTime);
-    const segEndRel = Math.max(segStartRel + 0.3, seg.end - clipStartTime);
-    const words = seg.words || [];
+    const segStartRel = seg.start;
+    const segEndRel = Math.max(segStartRel + 0.3, seg.end);
+    const words = seg.words && seg.words.length > 0
+      ? seg.words
+      : seg.text.split(/\s+/).filter(Boolean).map((w, idx, arr) => {
+          const wDur = (segEndRel - segStartRel) / Math.max(1, arr.length);
+          return {
+            word: w,
+            start: segStartRel + idx * wDur,
+            end: segStartRel + (idx + 1) * wDur,
+          };
+        });
 
     if (words.length === 0) {
       const cleanText = seg.text.replace(/[{}]/g, '').toUpperCase();
@@ -434,13 +479,13 @@ export function generateAssSubtitles(params: {
       const clusterSize = 4;
       for (let i = 0; i < words.length; i += clusterSize) {
         const cluster = words.slice(i, i + clusterSize);
-        const clusterStart = Math.max(0, cluster[0].start - clipStartTime);
-        const clusterEnd = Math.max(clusterStart + 0.4, cluster[cluster.length - 1].end - clipStartTime);
+        const clusterStart = Math.max(0, cluster[0].start);
+        const clusterEnd = Math.max(clusterStart + 0.4, cluster[cluster.length - 1].end);
 
         for (let activeIdx = 0; activeIdx < cluster.length; activeIdx++) {
           const activeWord = cluster[activeIdx];
-          const wordStartRel = Math.max(clusterStart, activeWord.start - clipStartTime);
-          const wordEndRel = Math.min(clusterEnd, Math.max(wordStartRel + 0.15, activeWord.end - clipStartTime));
+          const wordStartRel = Math.max(clusterStart, activeWord.start);
+          const wordEndRel = Math.min(clusterEnd, Math.max(wordStartRel + 0.15, activeWord.end));
 
           const activeColorTag =
             style === 'neon'
@@ -828,7 +873,7 @@ export const ShortsService = {
       } catch {}
     }
 
-    // 3. Download subtitles using yt-dlp with strict 5s timeout
+    // 3. Download subtitles using yt-dlp with resilient clients and 15s timeout
     try {
       const vttTemplate = path.join(uploadsDir, `yt-${sanitizedId}.%(ext)s`);
       const args = [
@@ -838,15 +883,34 @@ export const ShortsService = {
         '--write-auto-subs',
         '--write-subs',
         '--sub-langs',
-        'en.*,en,hi.*',
+        'all,-live_chat',
         '--sub-format',
         'vtt',
         '--no-playlist',
         '--no-warnings',
+        '--extractor-args',
+        'youtube:player_client=mweb,android,web',
+        '--user-agent',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+        '--socket-timeout',
+        '20',
         '-o',
         vttTemplate,
         url,
       ];
+
+      // Check for optional cookies to bypass YouTube bot limits
+      const possibleCookies = [
+        path.join(uploadsDir, 'cookies.txt'),
+        path.join(uploadsDir, 'youtube_cookies.txt'),
+        path.resolve(process.cwd(), 'cookies.txt'),
+      ];
+      for (const cPath of possibleCookies) {
+        if (fs.existsSync(cPath)) {
+          args.splice(1, 0, '--cookies', cPath);
+          break;
+        }
+      }
 
       await new Promise<void>((resolve) => {
         const proc = spawn(getYtDlpBinary(), args, { windowsHide: true });
@@ -855,7 +919,7 @@ export const ShortsService = {
             proc.kill();
           } catch {}
           resolve();
-        }, 5000);
+        }, 15000);
 
         proc.on('close', () => {
           clearTimeout(timer);
@@ -2141,31 +2205,21 @@ ${transcriptText}`;
 
       archive.pipe(output);
 
-      const videoTitle = (job.videoInfo?.title || '')
-        .replace(/[\\/:*?"<>|#]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
+      const usedNames = new Set<string>();
       for (let idx = 0; idx < renderedFiles.length; idx++) {
         const item = renderedFiles[idx];
-        const cleanClip = (item.title || `Clip ${idx + 1}`)
+        let cleanName = (item.title || `Short ${idx + 1}`)
           .replace(/[\\/:*?"<>|#]/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
 
-        let fullTitle = '';
-        if (videoTitle && cleanClip) {
-          if (cleanClip.toLowerCase().includes(videoTitle.toLowerCase())) {
-            fullTitle = cleanClip;
-          } else {
-            fullTitle = `${videoTitle} - ${cleanClip}`;
-          }
-        } else {
-          fullTitle = cleanClip || videoTitle || `Clip ${idx + 1}`;
+        if (cleanName.length > 100) cleanName = cleanName.substring(0, 100).trim();
+        let entryName = `${cleanName}.mp4`;
+        if (usedNames.has(entryName.toLowerCase())) {
+          entryName = `${cleanName} (${idx + 1}).mp4`;
         }
+        usedNames.add(entryName.toLowerCase());
 
-        if (fullTitle.length > 120) fullTitle = fullTitle.substring(0, 120).trim();
-        const entryName = `${String(idx + 1).padStart(2, '0')} - ${fullTitle}.mp4`;
         archive.file(item.filePath, { name: entryName });
       }
 
@@ -2298,31 +2352,20 @@ ${transcriptText}`;
             autoDucking: params.autoDucking,
           });
 
-          const cleanClip = (clip.title || `Clip ${clipIndex + 1}`)
+          let cleanName = (clip.title || `Short ${clipIndex + 1}`)
             .replace(/[\\/:*?"<>|#]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
 
-          let fullTitle = '';
-          if (videoTitle && cleanClip) {
-            if (cleanClip.toLowerCase().includes(videoTitle.toLowerCase())) {
-              fullTitle = cleanClip;
-            } else {
-              fullTitle = `${videoTitle} - ${cleanClip}`;
-            }
-          } else {
-            fullTitle = cleanClip || videoTitle || `Clip ${clipIndex + 1}`;
-          }
-
-          if (fullTitle.length > 120) fullTitle = fullTitle.substring(0, 120).trim();
-          const cleanFilename = `${String(clipIndex + 1).padStart(2, '0')} - ${fullTitle}.mp4`;
+          if (cleanName.length > 100) cleanName = cleanName.substring(0, 100).trim();
+          const cleanFilename = `${cleanName}.mp4`;
           const destinationPath = path.join(folderPath, cleanFilename);
 
           // Copy rendered short into dedicated folder
           fs.copyFileSync(res.filePath, destinationPath);
 
           return {
-            title: fullTitle,
+            title: cleanName,
             filename: cleanFilename,
             url: `/uploads/shorts/${folderName}/${encodeURIComponent(cleanFilename)}`,
             duration: res.duration,
