@@ -1316,6 +1316,8 @@ export const ShortsService = {
     // Full runtime from 0s to duration is available for shorts!
     const introSkip = 0;
     const maxUsableTime = duration;
+    const idealSpacing = duration / Math.max(1, clipCount);
+    const maxAllowedOverlap = idealSpacing < minLen ? Math.max(4, Math.round(minLen - idealSpacing + 5)) : 4;
 
     // 2. Filter transcript across the full video [0, maxUsableTime]
     const coreTranscript = transcript.filter(
@@ -1385,8 +1387,7 @@ export const ShortsService = {
           .join('\n\n');
 
         const prompt = `You are an elite YouTube Shorts, TikTok, and Instagram Reels editor.
-Your mission is to select the top ${clipCount} most viral, addictive, high-retention moments from this video.
-Ensure the clips are well distributed throughout the WHOLE video from start to finish (opening hooks, early discussions, mid-video peaks, late insights, and climax moments).
+Your mission is to return EXACTLY ${clipCount} distinct viral, addictive, high-retention moments from this video.
 
 Video Title: "${info.title}"
 Total Duration: ${Math.round(duration)} seconds
@@ -1394,12 +1395,13 @@ USABLE CONTENT WINDOW: Entire video from 0s to ${Math.round(duration)}s.
 Desired Clip Length: Between ${minLen} and ${maxLen} seconds.
 
 CRITICAL RULES (MUST FOLLOW STRICTLY):
-1. USE THE WHOLE VIDEO: Extract clips from anywhere across the entire runtime (0s to ${Math.round(duration)}s).
-2. ZERO DUPLICATE OR OVERLAPPING SHORTS: Every clip must cover a completely separate, unique timestamp range. Do NOT allow any two clips to overlap.
-3. MEANINGFUL & COMPLETE THOUGHTS: Every clip MUST make complete sense independently. It must contain a clear setup, escalation/insight, and punchy conclusion. NEVER cut off mid-sentence or mid-thought.
-4. NO NUMBERINGS IN TITLES OR HEADLINES: DO NOT include "#1", "#2", "Part 1", "Part 2", "Clip 1", or trailing numbers anywhere. Give every clip an authentic, punchy standalone title describing the actual moment.
-5. Provide a virality score between 80 and 99.
-6. Provide a punchy "suggestedHeadline" for the video overlay without any numbering (e.g. "WAIT TILL THE END 😱" or "HOW HE ACTUALLY DID IT 🔥").
+1. EXACT COUNT REQUIRED: You MUST generate and return EXACTLY ${clipCount} distinct clips in the "clips" array. Do NOT stop at 4. Return all ${clipCount} clips!
+2. USE THE WHOLE VIDEO: Distribute all ${clipCount} clips across the entire runtime (0s to ${Math.round(duration)}s) from the very start to the end.
+3. AVOID DUPLICATES: Space out the clips so they cover different moments, thoughts, and sections of the conversation.
+4. MEANINGFUL & COMPLETE THOUGHTS: Every clip MUST make complete sense independently with a clear setup and punchline.
+5. NO NUMBERINGS IN TITLES OR HEADLINES: DO NOT include "#1", "#2", "Part 1", "Part 2", "Clip 1" anywhere. Give every clip an authentic, punchy standalone title describing the actual moment.
+6. Provide a virality score between 80 and 99.
+7. Provide a punchy "suggestedHeadline" for the video overlay without any numbering (e.g. "WAIT TILL THE END 😱" or "HOW HE ACTUALLY DID IT 🔥").
 
 Respond strictly with valid JSON conforming to this schema:
 {
@@ -1447,7 +1449,7 @@ ${transcriptText}`;
               }
 
               // De-duplication check: reject if overlapping with any already accepted clip
-              if (hasOverlapWithAccepted(start, end, acceptedClips, 4)) {
+              if (hasOverlapWithAccepted(start, end, acceptedClips, maxAllowedOverlap)) {
                 console.log(`⏩ [Shorts AI] Skipping overlapping clip candidate (${start}s - ${end}s)`);
                 continue;
               }
@@ -1793,7 +1795,11 @@ ${transcriptText}`;
     const usableDuration = Math.max(10, maxUsableTime - introSkip);
     const needed = Math.max(1, count - existingClips.length);
 
-    // 1. Build narrative speech blocks from transcript across the WHOLE video [0, totalDuration]
+    // Calculate dynamic overlap: if needed clips * minLen > usableDuration, allow smooth sliding overlap
+    const idealSpacing = usableDuration / Math.max(1, count);
+    const maxAllowedOverlap = idealSpacing < minLen ? Math.max(4, Math.round(minLen - idealSpacing + 5)) : 4;
+
+    // 1. Build fine-grained narrative candidate windows from transcript across the WHOLE video
     const candidateBlocks: Array<{
       start: number;
       end: number;
@@ -1803,62 +1809,58 @@ ${transcriptText}`;
     }> = [];
 
     if (transcript && transcript.length > 0) {
-      let curSegs: TranscriptSegment[] = [];
-      for (const seg of transcript) {
-        if (seg.start >= maxUsableTime) continue;
-        if (curSegs.length === 0) {
-          curSegs.push(seg);
-          continue;
-        }
-        const last = curSegs[curSegs.length - 1];
-        const blockDur = seg.end - curSegs[0].start;
-        const gap = seg.start - last.end;
-        const hasTerminal = /[.?!]$/.test(last.text.trim());
+      for (let sIdx = 0; sIdx < transcript.length; sIdx++) {
+        const seg = transcript[sIdx];
+        if (seg.start < introSkip || seg.start >= maxUsableTime - minLen) continue;
 
-        if (blockDur >= minLen && (hasTerminal || gap > 1.2 || blockDur >= maxLen)) {
+        const isStartCandidate =
+          sIdx === 0 ||
+          /[.?!]$/.test(transcript[sIdx - 1].text.trim()) ||
+          seg.start - transcript[sIdx - 1].end > 0.6 ||
+          /^[A-Z]/.test(seg.text.trim());
+
+        if (!isStartCandidate) continue;
+
+        const matchingEnds = transcript.filter(
+          (t) => t.end >= seg.start + minLen && t.end <= Math.min(maxUsableTime, seg.start + maxLen + 5)
+        );
+
+        if (matchingEnds.length > 0) {
+          const terminalEnd = matchingEnds.find((t) => /[.?!]$/.test(t.text.trim())) || matchingEnds[matchingEnds.length - 1];
+          const clipSegs = transcript.filter((t) => t.start >= seg.start && t.end <= terminalEnd.end);
           candidateBlocks.push({
-            start: Math.max(introSkip, curSegs[0].start),
-            end: Math.min(maxUsableTime, last.end),
-            text: curSegs.map((s) => s.text.trim()).join(' '),
-            firstSentence: curSegs[0].text.trim(),
-            segments: [...curSegs],
+            start: Math.max(introSkip, seg.start),
+            end: Math.min(maxUsableTime, terminalEnd.end),
+            text: clipSegs.map((t) => t.text.trim()).join(' '),
+            firstSentence: seg.text.trim(),
+            segments: clipSegs,
           });
-          curSegs = [seg];
-        } else {
-          curSegs.push(seg);
         }
-      }
-      if (curSegs.length > 0) {
-        const last = curSegs[curSegs.length - 1];
-        candidateBlocks.push({
-          start: Math.max(introSkip, curSegs[0].start),
-          end: Math.min(maxUsableTime, last.end),
-          text: curSegs.map((s) => s.text.trim()).join(' '),
-          firstSentence: curSegs[0].text.trim(),
-          segments: [...curSegs],
-        });
       }
     }
 
     // 2. Distribute candidate target start times evenly across the entire duration
     const step = needed > 1 ? (usableDuration - minLen) / (needed - 1) : usableDuration / 2;
+    let attempts = 0;
+    const maxAttempts = needed * 25;
 
-    for (let slot = 0; slot < needed && clips.length < needed; slot++) {
-      const targetTime = introSkip + slot * step;
-      const targetLength = Math.min(maxLen, Math.max(minLen, 24 + ((slot * 7) % 25)));
+    while (clips.length < needed && attempts < maxAttempts) {
+      const slotIndex = clips.length;
+      const targetTime = introSkip + (slotIndex * step) + ((attempts % 5) * 3);
+      const targetLength = Math.min(maxLen, Math.max(minLen, 24 + (((slotIndex + attempts) * 7) % 25)));
 
       let bestStart = targetTime;
       let bestEnd = Math.min(maxUsableTime, targetTime + targetLength);
       let clipSegments: TranscriptSegment[] = [];
       let hook = 'Listen closely to what happens right here...';
+      let foundCandidate = false;
 
-      // Find free candidate blocks that do not overlap with existing clips or previously picked clips
+      // Find candidate blocks closest to targetTime that do not overlap beyond maxAllowedOverlap
       const freeBlocks = candidateBlocks.filter(
-        (b) => !hasOverlapWithAccepted(b.start, b.end, [...existingClips, ...clips], 4)
+        (b) => !hasOverlapWithAccepted(b.start, b.end, [...existingClips, ...clips], maxAllowedOverlap)
       );
 
       if (freeBlocks.length > 0) {
-        // Pick the free block closest to targetTime
         freeBlocks.sort((a, b) => Math.abs(a.start - targetTime) - Math.abs(b.start - targetTime));
         const chosen = freeBlocks[0];
         bestStart = chosen.start;
@@ -1867,22 +1869,23 @@ ${transcriptText}`;
         if (chosen.firstSentence) {
           hook = `"${chosen.firstSentence}..."`;
         }
+        foundCandidate = true;
       } else {
         // Fallback: sliding search around targetTime across the whole video
-        let foundCandidate = false;
         const maxOffset = Math.ceil(usableDuration / 2);
-        for (let offset = 0; offset <= maxOffset; offset += 4) {
+        for (let offset = 0; offset <= maxOffset; offset += 3) {
           for (const sign of [0, 1, -1]) {
             if (offset === 0 && sign !== 0) continue;
             const candStart = Math.max(introSkip, Math.min(maxUsableTime - minLen, targetTime + sign * offset));
             let candEnd = Math.min(maxUsableTime, candStart + targetLength);
 
-            // Snap to nearest sentence boundary if transcript available
             if (transcript && transcript.length > 0) {
               const nearbyStarts = transcript.filter((t) => Math.abs(t.start - candStart) <= 8);
               if (nearbyStarts.length > 0) {
                 const s = nearbyStarts.find((t) => /^[A-Z]/.test(t.text.trim())) || nearbyStarts[0];
                 bestStart = Math.max(introSkip, s.start);
+              } else {
+                bestStart = candStart;
               }
               const nearbyEnds = transcript.filter((t) => t.end >= bestStart + minLen && t.end <= bestStart + maxLen + 5);
               if (nearbyEnds.length > 0) {
@@ -1896,7 +1899,7 @@ ${transcriptText}`;
               bestEnd = candEnd;
             }
 
-            if (bestEnd - bestStart >= minLen && !hasOverlapWithAccepted(bestStart, bestEnd, [...existingClips, ...clips], 4)) {
+            if (bestEnd - bestStart >= minLen && !hasOverlapWithAccepted(bestStart, bestEnd, [...existingClips, ...clips], maxAllowedOverlap)) {
               foundCandidate = true;
               clipSegments = transcript.filter((t) => t.start >= bestStart && t.end <= bestEnd);
               if (clipSegments.length > 0 && clipSegments[0].text) {
@@ -1907,10 +1910,12 @@ ${transcriptText}`;
           }
           if (foundCandidate) break;
         }
+      }
 
-        if (!foundCandidate && hasOverlapWithAccepted(bestStart, bestEnd, [...existingClips, ...clips], 4)) {
-          continue;
-        }
+      attempts++;
+
+      if (!foundCandidate && hasOverlapWithAccepted(bestStart, bestEnd, [...existingClips, ...clips], maxAllowedOverlap)) {
+        continue;
       }
 
       const template = archetypes[(existingClips.length + clips.length) % archetypes.length];

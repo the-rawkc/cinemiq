@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import ffmpeg from 'fluent-ffmpeg';
 import { ShortsService, getUploadsDir, getCopyrightFreeMusicTracks } from '../services/shorts.service';
 
 export const ShortsController = {
@@ -399,6 +400,23 @@ export const ShortsController = {
       const relativeUrl = `/uploads/shorts/${req.file.filename}`;
       const videoPath = req.file.path;
 
+      // Probe real duration using ffprobe
+      let videoDuration = 180;
+      try {
+        const metadata: any = await new Promise((resolve) => {
+          ffmpeg.ffprobe(videoPath, (err, data) => {
+            if (err) resolve(null);
+            else resolve(data);
+          });
+        });
+        if (metadata?.format?.duration) {
+          const parsedDur = parseFloat(metadata.format.duration);
+          if (!isNaN(parsedDur) && parsedDur > 5) {
+            videoDuration = Math.round(parsedDur);
+          }
+        }
+      } catch {}
+
       // Create synthetic job
       const job = {
         id: jobId,
@@ -408,7 +426,7 @@ export const ShortsController = {
         videoInfo: {
           id: jobId,
           title: req.file.originalname.replace(/\.[^/.]+$/, ''),
-          duration: 60, // will be probed or fallback
+          duration: videoDuration,
           thumbnail: '',
           channel: 'Local Upload',
           description: 'Uploaded video file',
