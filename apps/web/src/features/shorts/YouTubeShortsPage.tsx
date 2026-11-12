@@ -952,10 +952,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   // Single Click to Download ALL Clips at once in a ZIP bundle with full title names
   const handleDownloadAllZip = async () => {
     if (!job?.id || clips.length === 0) return;
-    if (!job?.videoUrl) {
-      setErrorMessage(`High-speed stream is buffering in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Bulk ZIP export will be available in moments!`);
-      return;
-    }
 
     setIsBatchRendering(true);
     setBatchDisplayPercent(0);
@@ -974,6 +970,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jobId: job.id,
+          youtubeUrl: job.url || youtubeUrl,
           aspectRatio,
           targetResolution,
           captionStyle,
@@ -1107,12 +1104,6 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
   // 1-Click Save Directly to a Folder on User's Computer with smooth progressive tracking
   const handleSaveDirectlyToFolder = async () => {
     if (!job?.id || clips.length === 0) return;
-    if (!job?.videoUrl) {
-      setFolderExportError(
-        `High-speed stream is caching in background (${job?.downloadProgress?.percent ? Math.round(job.downloadProgress.percent) : 50}%). Please wait a moment until stream finishes caching, then click export!`
-      );
-      return;
-    }
 
     setIsFolderExporting(true);
     setFolderExportError(null);
@@ -1148,6 +1139,7 @@ export const YouTubeShortsPage: React.FC<YouTubeShortsPageProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jobId: job.id,
+          youtubeUrl: job.url || youtubeUrl,
           aspectRatio,
           targetResolution,
           captionStyle,

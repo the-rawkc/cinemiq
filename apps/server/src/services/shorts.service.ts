@@ -64,6 +64,7 @@ export interface DownloadProgress {
 
 export interface ShortsJob {
   id: string;
+  url?: string;
   status: 'pending' | 'downloading' | 'analyzing' | 'done' | 'failed';
   progress: number;
   stage: string;
@@ -768,6 +769,7 @@ export const ShortsService = {
     const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const job: ShortsJob = {
       id: jobId,
+      url,
       status: 'pending',
       progress: 5,
       stage: 'Connecting to YouTube and initializing stream...',
@@ -1004,6 +1006,7 @@ export const ShortsService = {
       return;
     }
 
+    job.url = url;
     // 3. Fast progressive stream download with parallel connections & direct write
     job.status = 'downloading';
     job.stage = 'Clips ready! Caching high-speed stream for preview & export...';
@@ -1017,20 +1020,18 @@ export const ShortsService = {
         'node',
         '--newline',
         '-N',
-        '8',
+        '4',
         '--no-part',
         '--buffer-size',
         '2M',
         '--concurrent-fragments',
-        '8',
+        '4',
         '-f',
         'best[ext=mp4][height<=720]/best[height<=720]/18/bestvideo[height<=720]+bestaudio/best',
         '--merge-output-format',
         'mp4',
         '--no-playlist',
         '--no-abort-on-error',
-        '--extractor-args',
-        'youtube:player_client=android,web',
         '--retry-sleep',
         'exp=1:10',
         '--retries',
@@ -1098,7 +1099,12 @@ export const ShortsService = {
         if (hasVideo) {
           resolve();
         } else {
-          if (stderr.includes('429') || stderr.includes('Too Many Requests')) {
+          // If viral clips were already extracted by AI analysis, do not fail the job!
+          // Exports will seamlessly use fast on-demand section downloads.
+          if (earlyClips.length > 0 || (job.clips && job.clips.length > 0)) {
+            console.warn(`[ShortsJob ${jobId}] Background stream finished without single MP4: ${stderr.substring(0, 150)}. Proceeding in on-demand section mode.`);
+            resolve();
+          } else if (stderr.includes('429') || stderr.includes('Too Many Requests')) {
             reject(new Error('YouTube rate-limited this request (HTTP 429). Please try again in a few moments, or use the "Upload Video" tab to process your file directly.'));
           } else {
             reject(new Error(`Video download failed: ${stderr.substring(0, 250) || 'Unknown error'}`));
@@ -1106,25 +1112,31 @@ export const ShortsService = {
         }
       });
 
-      dlProc.on('error', (err) => reject(err));
+      dlProc.on('error', (err) => {
+        if (earlyClips.length > 0 || (job.clips && job.clips.length > 0)) {
+          console.warn(`[ShortsJob ${jobId}] Background dlProc error ignored (clips ready):`, err);
+          resolve();
+        } else {
+          reject(err);
+        }
+      });
     });
 
     job.downloadEndTime = Date.now();
     job.downloadTimeMs = job.downloadEndTime - (job.downloadStartTime || jobStartTime);
     job.isCachedSource = false;
 
-    // Locate downloaded video
+    // Locate downloaded video if available
     const updatedFiles = fs.readdirSync(uploadsDir);
     const videoFile = updatedFiles.find(
       (f) => (f.startsWith(`yt-${sanitizedId}`) || f.startsWith(jobId)) && (f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv'))
     );
-    if (!videoFile) {
-      throw new Error('Downloaded video file could not be found.');
+    if (videoFile) {
+      const finalVideoPath = path.join(uploadsDir, videoFile);
+      job.videoPath = finalVideoPath;
+      job.videoUrl = `/uploads/shorts/${videoFile}`;
     }
 
-    const finalVideoPath = path.join(uploadsDir, videoFile);
-    job.videoPath = finalVideoPath;
-    job.videoUrl = `/uploads/shorts/${videoFile}`;
     job.progress = 100;
     job.stage = `Analysis complete! All ${earlyClips.length} clips ready to preview and export.`;
     job.status = 'done';
@@ -1968,6 +1980,7 @@ ${transcriptText}`;
    */
   async renderAllClipsZip(params: {
     jobId: string;
+    youtubeUrl?: string;
     aspectRatio?: '9:16-blur' | '9:16-crop' | '16:9-fit' | 'original';
     targetResolution?: '720p' | '1080p';
     captionStyle?: CaptionStyle;
@@ -1997,9 +2010,17 @@ ${transcriptText}`;
       );
       if (matched) {
         job.videoPath = path.join(uploadsDir, matched);
-      } else {
-        throw new Error(`Source video is still buffering or not found on disk for ID: ${params.jobId}`);
       }
+    }
+
+    const targetUrl =
+      params.youtubeUrl ||
+      job.url ||
+      job.videoInfo?.webpage_url ||
+      (job.videoInfo?.id ? `https://www.youtube.com/watch?v=${job.videoInfo.id}` : null);
+
+    if ((!job.videoPath || !fs.existsSync(job.videoPath)) && !targetUrl) {
+      throw new Error(`Source video is not available on disk and no YouTube URL was found for ID: ${params.jobId}`);
     }
 
     const clips = job.clips || [];
@@ -2038,10 +2059,26 @@ ${transcriptText}`;
           const endTime = trim?.end ?? clip.endTime;
           const headlineText = params.customHeadlines?.[clip.id] ?? clip.suggestedHeadline ?? '';
 
+          let clipSource = job.videoPath && fs.existsSync(job.videoPath) ? job.videoPath : null;
+          let renderStart = startTime;
+          let renderEnd = endTime;
+
+          // If full video is still buffering in background, download only this 15-30s section in ~1-2s!
+          if (!clipSource) {
+            console.log(`⚡ [Shorts ZIP] Fast on-demand section download for clip ${clipIndex + 1} (${startTime}s -> ${endTime}s)...`);
+            clipSource = await this.downloadClipSection({
+              url: targetUrl!,
+              startTime,
+              endTime,
+            });
+            renderStart = 0;
+            renderEnd = Math.max(1, endTime - startTime);
+          }
+
           const res = await this.renderShortClip({
-            sourceVideoPath: job.videoPath!,
-            startTime,
-            endTime,
+            sourceVideoPath: clipSource,
+            startTime: renderStart,
+            endTime: renderEnd,
             aspectRatio,
             headlineText,
             targetResolution: params.targetResolution,
@@ -2124,6 +2161,7 @@ ${transcriptText}`;
    */
   async exportAllClipsFolder(params: {
     jobId: string;
+    youtubeUrl?: string;
     aspectRatio?: '9:16-blur' | '9:16-crop' | '16:9-fit' | 'original';
     targetResolution?: '720p' | '1080p';
     captionStyle?: CaptionStyle;
@@ -2160,9 +2198,17 @@ ${transcriptText}`;
       );
       if (matched) {
         job.videoPath = path.join(uploadsDir, matched);
-      } else {
-        throw new Error(`Source video is still buffering or not found on disk for ID: ${params.jobId}`);
       }
+    }
+
+    const targetUrl =
+      params.youtubeUrl ||
+      job.url ||
+      job.videoInfo?.webpage_url ||
+      (job.videoInfo?.id ? `https://www.youtube.com/watch?v=${job.videoInfo.id}` : null);
+
+    if ((!job.videoPath || !fs.existsSync(job.videoPath)) && !targetUrl) {
+      throw new Error(`Source video is not available on disk and no YouTube URL was found for ID: ${params.jobId}`);
     }
 
     const clips = job.clips || [];
@@ -2198,10 +2244,26 @@ ${transcriptText}`;
           const endTime = trim?.end ?? clip.endTime;
           const headlineText = params.customHeadlines?.[clip.id] ?? clip.suggestedHeadline ?? '';
 
+          let clipSource = job.videoPath && fs.existsSync(job.videoPath) ? job.videoPath : null;
+          let renderStart = startTime;
+          let renderEnd = endTime;
+
+          // If full video is still buffering in background, download only this 15-30s section in ~1-2s!
+          if (!clipSource) {
+            console.log(`⚡ [Shorts Folder] Fast on-demand section download for clip ${clipIndex + 1} (${startTime}s -> ${endTime}s)...`);
+            clipSource = await this.downloadClipSection({
+              url: targetUrl!,
+              startTime,
+              endTime,
+            });
+            renderStart = 0;
+            renderEnd = Math.max(1, endTime - startTime);
+          }
+
           const res = await this.renderShortClip({
-            sourceVideoPath: job.videoPath!,
-            startTime,
-            endTime,
+            sourceVideoPath: clipSource,
+            startTime: renderStart,
+            endTime: renderEnd,
             aspectRatio,
             headlineText,
             targetResolution: params.targetResolution,

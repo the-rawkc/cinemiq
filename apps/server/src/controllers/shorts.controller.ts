@@ -250,6 +250,7 @@ export const ShortsController = {
     try {
       const {
         jobId,
+        youtubeUrl,
         aspectRatio = '9:16-blur',
         targetResolution = '720p',
         captionStyle = 'none',
@@ -269,6 +270,7 @@ export const ShortsController = {
 
       const result = await ShortsService.renderAllClipsZip({
         jobId,
+        youtubeUrl,
         aspectRatio,
         targetResolution,
         captionStyle,
@@ -299,6 +301,7 @@ export const ShortsController = {
     try {
       const {
         jobId,
+        youtubeUrl,
         aspectRatio = '9:16-blur',
         targetResolution = '720p',
         captionStyle = 'none',
@@ -318,6 +321,7 @@ export const ShortsController = {
 
       const result = await ShortsService.exportAllClipsFolder({
         jobId,
+        youtubeUrl,
         aspectRatio,
         targetResolution,
         captionStyle,
