@@ -1956,9 +1956,8 @@ ${transcriptText}`;
         }
       }
 
-      // Extract opening hook from the first spoken sentence
-      let hook = 'Listen closely to what happens right here...';
-      if (clipSegments.length > 0 && clipSegments[0].text) {
+      // Update hook from synthesized segments if no speech-based hook was found yet
+      if (hook === 'Listen closely to what happens right here...' && clipSegments.length > 0 && clipSegments[0].text) {
         hook = `"${clipSegments[0].text}..."`;
       }
 
